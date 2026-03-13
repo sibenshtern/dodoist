@@ -1,0 +1,115 @@
+/* ─── Dodoist Global Styles ─────────────────────────────────────────────── */
+
+:root {
+  --tui-font-heading: 'Cormorant Garamond', Georgia, serif;
+  --tui-font-text:    'Outfit', sans-serif;
+
+  /* Brand tokens */
+  --dodo-bg-void:     #07060C;
+  --dodo-bg-base:     #0D0B14;
+  --dodo-bg-surface:  #131120;
+  --dodo-bg-card:     #1A1828;
+
+  --dodo-accent:       #C9A96E;
+  --dodo-accent-hover: #DFBF85;
+  --dodo-accent-dim:   rgba(201, 169, 110, 0.12);
+  --dodo-accent-glow:  rgba(201, 169, 110, 0.3);
+
+  --dodo-violet:       #7B6EFF;
+  --dodo-violet-dim:   rgba(123, 110, 255, 0.12);
+  --dodo-green:        #5ECFA0;
+  --dodo-red:          #E86858;
+
+  --dodo-text-1: #EDE8DC;
+  --dodo-text-2: #7E7A90;
+  --dodo-text-3: #45424E;
+
+  --dodo-border:    rgba(237, 232, 220, 0.07);
+  --dodo-border-md: rgba(237, 232, 220, 0.14);
+
+  /* Taiga UI dark tokens */
+  --tui-background-base:              var(--dodo-bg-surface);
+  --tui-background-base-alt:          var(--dodo-bg-card);
+  --tui-background-neutral-1:         rgba(237, 232, 220, 0.06);
+  --tui-background-neutral-1-hover:   rgba(237, 232, 220, 0.10);
+  --tui-background-neutral-1-pressed: rgba(237, 232, 220, 0.16);
+  --tui-background-neutral-2:         rgba(237, 232, 220, 0.10);
+  --tui-background-neutral-2-hover:   rgba(237, 232, 220, 0.16);
+  --tui-background-elevation-1:       var(--dodo-bg-card);
+  --tui-background-elevation-2:       #21203080;
+  --tui-background-elevation-3:       #2A2840;
+  --tui-background-accent-1:          var(--dodo-accent);
+  --tui-background-accent-1-hover:    var(--dodo-accent-hover);
+  --tui-background-accent-1-pressed:  #A8884A;
+  --tui-background-accent-opposite:   var(--dodo-bg-void);
+  --tui-background-accent-opposite-hover: #120F1E;
+
+  --tui-text-primary:   var(--dodo-text-1);
+  --tui-text-secondary: var(--dodo-text-2);
+  --tui-text-tertiary:  var(--dodo-text-3);
+  --tui-text-action:         var(--dodo-accent);
+  --tui-text-action-hover:   var(--dodo-accent-hover);
+  --tui-text-positive:  var(--dodo-green);
+  --tui-text-negative:  var(--dodo-red);
+
+  --tui-border-normal: var(--dodo-border);
+  --tui-border-hover:  var(--dodo-border-md);
+  --tui-border-focus:  rgba(201, 169, 110, 0.5);
+
+  --tui-service-backdrop:            rgba(0, 0, 0, 0.85);
+  --tui-service-autofill-background: #1e1a10;
+
+  --tui-status-positive: var(--dodo-green);
+  --tui-status-negative: var(--dodo-red);
+  --tui-status-info:     var(--dodo-violet);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  background: var(--dodo-bg-void);
+  color: var(--dodo-text-1);
+  font-family: 'Outfit', sans-serif;
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+}
+
+tui-root {
+  display: block;
+  min-height: 100vh;
+  background: var(--dodo-bg-void);
+}
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--dodo-text-3); border-radius: 3px; }
+
+/* ─── Animations ─── */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(32px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes floatY {
+  0%, 100% { transform: translateY(0); }
+  50%       { transform: translateY(-10px); }
+}
+@keyframes taskSlideIn {
+  from { opacity: 0; transform: translateX(24px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes checkPop {
+  0%   { transform: scale(0) rotate(-45deg); opacity: 0; }
+  60%  { transform: scale(1.3) rotate(0deg); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes orbitPulse {
+  0%, 100% { opacity: 0.4; transform: scale(1); }
+  50%       { opacity: 0.7; transform: scale(1.06); }
+}
