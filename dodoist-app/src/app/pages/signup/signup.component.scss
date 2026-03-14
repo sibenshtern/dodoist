@@ -1,0 +1,181 @@
+$red:    #db4035;
+$dark:   #1a1814;
+$gray:   #8a8680;
+$border: #e8e6e1;
+$white:  #ffffff;
+$bg:     #f7f6f3;
+
+$font-heading: 'Lora', Georgia, serif;
+$font-body:    'Manrope', sans-serif;
+
+:host {
+  --tui-background-accent-1:          #{$red};
+  --tui-background-accent-1-hover:    #c23630;
+  --tui-background-accent-1-pressed:  #a82e2a;
+  --tui-background-accent-opposite:   #{$white};
+  --tui-font-text: #{$font-body};
+
+  display: block;
+  font-family: $font-body;
+  -webkit-font-smoothing: antialiased;
+}
+
+.auth-page {
+  min-height: 100vh;
+  background: $bg;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 16px;
+}
+
+.card {
+  background: $white;
+  border: 1.111px solid $border;
+  border-radius: 16px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  width: 460px;
+  padding: 40px;
+}
+
+.card__logo {
+  display: block;
+  font-family: $font-body;
+  font-weight: 800;
+  font-size: 22px;
+  color: $red;
+  text-decoration: none;
+  margin-bottom: 24px;
+}
+
+.card__heading {
+  font-family: $font-heading;
+  font-size: 28px;
+  font-weight: 600;
+  color: $dark;
+  margin: 0 0 8px;
+  line-height: 1.5;
+}
+
+.card__subtext {
+  font-size: 13.5px;
+  color: $gray;
+  margin: 0 0 24px;
+  line-height: 1.5;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.field__label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: $gray;
+  letter-spacing: 0.3px;
+}
+
+.field__label-hint {
+  font-weight: 400;
+  color: $gray;
+}
+
+.field__input-wrap {
+  position: relative;
+}
+
+.field__input {
+  width: 100%;
+  height: 40px;
+  padding: 9px 12px;
+  background: $white;
+  border: 1.111px solid $border;
+  border-radius: 6px;
+  font-family: $font-body;
+  font-size: 13.5px;
+  color: $dark;
+  outline: none;
+  transition: border-color 0.15s;
+  box-sizing: border-box;
+
+  &::placeholder { color: #b0aea9; }
+
+  &:focus { border-color: $red; }
+
+  &--error { border-color: $red; }
+
+  &--padded { padding-right: 40px; }
+}
+
+.field__select {
+  width: 100%;
+  height: 40px;
+  padding: 0 32px 0 12px;
+  background: $white url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%238a8680' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 12px center;
+  border: 1.111px solid $border;
+  border-radius: 6px;
+  font-family: $font-body;
+  font-size: 13.5px;
+  color: $dark;
+  outline: none;
+  appearance: none;
+  cursor: pointer;
+  transition: border-color 0.15s;
+  box-sizing: border-box;
+
+  &:focus { border-color: $red; }
+}
+
+.field__eye {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  padding: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+
+  &:hover svg { stroke: $dark; }
+}
+
+.field__error {
+  font-size: 11.5px;
+  color: $red;
+}
+
+.submit-btn {
+  width: 100%;
+  margin-top: 4px;
+}
+
+.card__footer {
+  font-size: 12.5px;
+  color: $gray;
+  text-align: center;
+  margin: 0;
+  line-height: 1.6;
+}
+
+.card__footer--spaced {
+  margin-top: 8px;
+}
+
+.card__footer-link {
+  font-weight: 600;
+  color: $red;
+  text-decoration: none;
+
+  &:hover { text-decoration: underline; }
+}
