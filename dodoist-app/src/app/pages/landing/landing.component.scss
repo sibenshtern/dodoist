@@ -1,0 +1,792 @@
+// ─── Design tokens ────────────────────────────────────────────────────────────
+
+$red:        #db4035;
+$dark:       #1a1814;
+$gray:       #8a8680;
+$border:     #e8e6e1;
+$bg-page:    #edebe6;
+$bg-surface: #fafaf8;
+$white:      #ffffff;
+
+$font-heading: 'Lora', Georgia, serif;
+$font-body:    'Manrope', sans-serif;
+
+// ─── Host ─────────────────────────────────────────────────────────────────────
+
+:host {
+  display: block;
+  font-family: $font-body;
+  background: $bg-page;
+  color: $dark;
+  -webkit-font-smoothing: antialiased;
+}
+
+.landing { min-height: 100vh; }
+
+// ─── Shared buttons ───────────────────────────────────────────────────────────
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: $font-body;
+  font-weight: 600;
+  font-size: 13.5px;
+  line-height: 1.5;
+  border-radius: 6px;
+  padding: 9px 18px;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: opacity 0.15s, background 0.15s, border-color 0.15s;
+  border: 1.111px solid transparent;
+
+  &--primary {
+    background: $red;
+    color: $white;
+
+    &:hover { opacity: 0.88; }
+  }
+
+  &--outline {
+    background: transparent;
+    color: $dark;
+    border-color: $border;
+
+    &:hover { background: $bg-page; }
+  }
+
+  &--lg {
+    font-size: 15px;
+    padding: 12px 24px;
+  }
+}
+
+// ─── Navigation ───────────────────────────────────────────────────────────────
+
+.nav {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: $white;
+  border-bottom: 1.111px solid $border;
+  height: 64px;
+}
+
+.nav__inner {
+  max-width: 1680px;
+  margin: 0 auto;
+  padding: 0 40px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 32px;
+}
+
+.nav__logo {
+  font-family: $font-body;
+  font-weight: 800;
+  font-size: 20px;
+  color: $red;
+  text-decoration: none;
+  flex-shrink: 0;
+}
+
+.nav__links {
+  display: flex;
+  gap: 4px;
+  flex: 1;
+}
+
+.nav__link {
+  font-size: 14px;
+  font-weight: 500;
+  color: $gray;
+  text-decoration: none;
+  padding: 8px 14px;
+  border-radius: 6px;
+  transition: color 0.15s, background 0.15s;
+
+  &:hover {
+    color: $dark;
+    background: $bg-page;
+  }
+}
+
+.nav__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.nav__login {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: $dark;
+  text-decoration: none;
+  padding: 8px 14px;
+  border-radius: 6px;
+  transition: background 0.15s;
+
+  &:hover { background: $bg-page; }
+}
+
+// ─── Hero ─────────────────────────────────────────────────────────────────────
+
+.hero {
+  background: $bg-surface;
+  padding: 0;
+}
+
+.hero__inner {
+  max-width: 1680px;
+  margin: 0 auto;
+  padding: 80px 340px;
+  display: grid;
+  grid-template-columns: 470px 1fr;
+  gap: 100px;
+  align-items: center;
+}
+
+.hero__content {
+  display: flex;
+  flex-direction: column;
+}
+
+.hero__eyebrow {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: $red;
+  margin: 0 0 18px;
+}
+
+.hero__heading {
+  font-family: $font-heading;
+  font-size: 50px;
+  font-weight: 600;
+  line-height: 1.12;
+  margin: 0 0 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hero__heading-black { color: $dark; }
+
+.hero__heading-accent {
+  color: $red;
+  font-style: italic;
+}
+
+.hero__description {
+  font-size: 17px;
+  font-weight: 400;
+  line-height: 1.65;
+  color: $gray;
+  margin: 0 0 36px;
+}
+
+.hero__ctas {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.hero__disclaimer {
+  font-size: 12px;
+  color: $gray;
+  margin: 0;
+}
+
+// ─── Task mockup (light card) ─────────────────────────────────────────────────
+
+.hero__mockup {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.mockup {
+  background: $white;
+  border: 1.111px solid $border;
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(0, 0, 0, 0.04);
+  width: 460px;
+  overflow: hidden;
+}
+
+.mockup__header {
+  padding: 20px 20px 16px;
+  border-bottom: 1px solid $border;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.mockup__header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+}
+
+.mockup__header-icon {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.mockup__header-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: $dark;
+  margin: 0;
+  line-height: 1.2;
+}
+
+.mockup__header-sub {
+  font-size: 11px;
+  color: $gray;
+  margin: 0;
+  line-height: 1.2;
+}
+
+.mockup__progress {
+  flex-shrink: 0;
+  width: 80px;
+}
+
+.mockup__progress-bar {
+  height: 4px;
+  background: $border;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.mockup__progress-fill {
+  height: 100%;
+  background: #299438;
+  border-radius: 2px;
+  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.mockup__body {
+  padding: 8px 12px 12px;
+}
+
+// ─── Task rows ────────────────────────────────────────────────────────────────
+
+.task {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px;
+  height: 38px;
+  border-radius: 8px;
+  width: 100%;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.1s;
+
+  &:hover { background: #f7f5f2; }
+
+  &--done .task__text {
+    text-decoration: line-through;
+    color: $gray;
+  }
+
+  &--add {
+    cursor: default;
+    background: #f7f5f2;
+    margin-top: 4px;
+    gap: 6px;
+
+    &:hover { background: #f0eee9; }
+  }
+}
+
+.task__checkbox {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1.667px solid $border;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s, border-color 0.2s;
+
+  &--checked {
+    background: #299438;
+    border-color: #299438;
+  }
+}
+
+.task__text {
+  font-size: 13px;
+  font-weight: 500;
+  color: $dark;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color 0.2s;
+}
+
+.task__add-icon {
+  font-size: 14px;
+  color: $gray;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.task__add-label {
+  font-size: 13px;
+  color: $gray;
+}
+
+.badge {
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 100px;
+  white-space: nowrap;
+  flex-shrink: 0;
+
+  &--critical { background: #fff0ef; color: $red; }
+  &--high     { background: #ebf2fd; color: #246fe0; }
+  &--personal { background: #f0eee9; color: $gray; }
+}
+
+// ─── Feature strip (dark) ─────────────────────────────────────────────────────
+
+.feature-strip {
+  background: $dark;
+  display: flex;
+  padding: 0 40px;
+}
+
+.feature-strip__item {
+  flex: 1;
+  padding: 32px 24px;
+  border-right: 0.556px solid rgba(255, 255, 255, 0.1);
+
+  &--last { border-right: none; }
+}
+
+.feature-strip__icon {
+  display: block;
+  font-size: 26px;
+  line-height: 1;
+  margin-bottom: 16px;
+}
+
+.feature-strip__title {
+  font-family: $font-body;
+  font-size: 14px;
+  font-weight: 700;
+  color: $white;
+  margin: 0 0 8px;
+}
+
+.feature-strip__desc {
+  font-size: 12.5px;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.55);
+  line-height: 1.6;
+  margin: 0;
+}
+
+// ─── Features detail ──────────────────────────────────────────────────────────
+
+.features-detail {
+  background: $bg-surface;
+  padding: 96px 0;
+}
+
+.features-detail__inner {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 0 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 80px;
+}
+
+.feat-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 64px;
+  align-items: center;
+
+  &--reversed {
+    direction: rtl;
+
+    > * { direction: ltr; }
+  }
+}
+
+.feat-row__eyebrow {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: $red;
+  margin: 0 0 12px;
+}
+
+.feat-row__heading {
+  font-family: $font-heading;
+  font-size: 32px;
+  font-weight: 600;
+  color: $dark;
+  margin: 0 0 16px;
+  line-height: 1.2;
+}
+
+.feat-row__desc {
+  font-size: 15px;
+  color: $gray;
+  line-height: 1.7;
+  margin: 0 0 24px;
+}
+
+.feat-row__bullets {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.feat-row__bullet {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  color: $dark;
+}
+
+.feat-row__bullet-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: $red;
+  flex-shrink: 0;
+}
+
+.feat-row__visual {
+  border-radius: 20px;
+  height: 280px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  border: 1.111px solid $border;
+}
+
+.feat-row__visual-icon {
+  font-size: 56px;
+  line-height: 1;
+}
+
+.feat-row__visual-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: $gray;
+  letter-spacing: 0.5px;
+}
+
+// ─── How it works ─────────────────────────────────────────────────────────────
+
+.steps {
+  background: $bg-page;
+  padding: 96px 0;
+}
+
+.steps__inner {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 0 40px;
+}
+
+.steps__header {
+  margin-bottom: 48px;
+}
+
+.steps__heading {
+  font-family: $font-heading;
+  font-size: 36px;
+  font-weight: 600;
+  color: $dark;
+  margin: 0 0 12px;
+}
+
+.steps__subheading {
+  font-size: 15px;
+  color: $gray;
+  margin: 0;
+}
+
+.steps__grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+}
+
+.step-card {
+  background: $white;
+  border: 1.111px solid $border;
+  border-radius: 16px;
+  padding: 29px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.step-card__number {
+  font-family: $font-heading;
+  font-size: 40px;
+  font-weight: 700;
+  color: $red;
+  opacity: 0.2;
+  line-height: 1;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.step-card__title {
+  font-family: $font-body;
+  font-size: 15px;
+  font-weight: 700;
+  color: $dark;
+  margin: 0;
+}
+
+.step-card__description {
+  font-size: 13px;
+  color: $gray;
+  line-height: 1.6;
+  margin: 0;
+}
+
+// ─── Pricing ──────────────────────────────────────────────────────────────────
+
+.pricing {
+  background: $bg-surface;
+  padding: 96px 0;
+}
+
+.pricing__inner {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 0 40px;
+}
+
+.pricing__header {
+  text-align: center;
+  margin-bottom: 56px;
+}
+
+.pricing__eyebrow {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: $red;
+  margin: 0 0 12px;
+}
+
+.pricing__heading {
+  font-family: $font-heading;
+  font-size: 36px;
+  font-weight: 600;
+  color: $dark;
+  margin: 0 0 12px;
+}
+
+.pricing__subheading {
+  font-size: 15px;
+  color: $gray;
+  margin: 0;
+}
+
+.pricing__grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.plan {
+  background: $white;
+  border: 1.111px solid $border;
+  border-radius: 16px;
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+
+  &--highlighted {
+    border-color: $red;
+    box-shadow: 0 8px 32px rgba(219, 64, 53, 0.12);
+  }
+}
+
+.plan__badge {
+  position: absolute;
+  top: -12px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: $red;
+  color: $white;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  padding: 3px 12px;
+  border-radius: 100px;
+  white-space: nowrap;
+}
+
+.plan__name {
+  font-size: 13px;
+  font-weight: 700;
+  color: $gray;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  margin: 0 0 12px;
+}
+
+.plan__price-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.plan__price {
+  font-family: $font-heading;
+  font-size: 40px;
+  font-weight: 700;
+  color: $dark;
+  line-height: 1;
+}
+
+.plan__period {
+  font-size: 13px;
+  color: $gray;
+}
+
+.plan__description {
+  font-size: 13px;
+  color: $gray;
+  line-height: 1.6;
+  margin: 0 0 24px;
+}
+
+.plan__cta {
+  width: 100%;
+  margin-bottom: 28px;
+}
+
+.plan__features {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.plan__feature {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13.5px;
+  color: $dark;
+}
+
+.plan__feature-check {
+  flex-shrink: 0;
+}
+
+// ─── Bottom CTA strip ─────────────────────────────────────────────────────────
+
+.cta-strip {
+  background: $dark;
+  padding: 96px 40px;
+}
+
+.cta-strip__inner {
+  max-width: 640px;
+  margin: 0 auto;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.cta-strip__heading {
+  font-family: $font-heading;
+  font-size: 40px;
+  font-weight: 600;
+  color: $white;
+  margin: 0;
+}
+
+.cta-strip__sub {
+  font-size: 16px;
+  color: rgba(255, 255, 255, 0.55);
+  margin: 0;
+}
+
+// ─── Footer ───────────────────────────────────────────────────────────────────
+
+.footer {
+  background: $white;
+  border-top: 1.111px solid $border;
+}
+
+.footer__inner {
+  max-width: 1680px;
+  margin: 0 auto;
+  padding: 0 40px;
+  height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.footer__logo {
+  font-family: $font-body;
+  font-weight: 800;
+  font-size: 15px;
+  color: $red;
+}
+
+.footer__links {
+  display: flex;
+  gap: 20px;
+}
+
+.footer__link {
+  font-size: 12.5px;
+  color: $gray;
+  text-decoration: none;
+  transition: color 0.15s;
+
+  &:hover { color: $dark; }
+}
+
+.footer__copy {
+  font-size: 12px;
+  color: $gray;
+  margin: 0;
+}

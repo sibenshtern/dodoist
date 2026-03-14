@@ -1,0 +1,202 @@
+<div class="landing">
+
+  <!-- Navigation -->
+  <nav class="nav">
+    <div class="nav__inner">
+      <a class="nav__logo" routerLink="/">Dodoist</a>
+      <div class="nav__links">
+        <a class="nav__link" href="#features">Features</a>
+        <a class="nav__link" href="#pricing">Pricing</a>
+        <a class="nav__link" routerLink="/docs">Docs</a>
+      </div>
+      <div class="nav__actions">
+        <a class="nav__login" routerLink="/login">Log in</a>
+        <a class="btn btn--primary" routerLink="/signup">Get started — it's free</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="hero__inner">
+      <div class="hero__content">
+        <p class="hero__eyebrow">Work & Personal, Unified</p>
+        <h1 class="hero__heading">
+          <span class="hero__heading-black">Organize everything,</span>
+          <span class="hero__heading-accent">ship faster.</span>
+        </h1>
+        <p class="hero__description">
+          Dodoist combines the simplicity of Todoist with the power of Jira.
+          Manage personal todos and complex projects — all in one place.
+        </p>
+        <div class="hero__ctas">
+          <a class="btn btn--primary btn--lg" routerLink="/signup">Start for free</a>
+          <a class="btn btn--outline" href="#features">See it in action →</a>
+        </div>
+        <p class="hero__disclaimer">No credit card required · Free up to 5 projects</p>
+      </div>
+
+      <!-- Interactive task mockup -->
+      <div class="hero__mockup">
+        <div class="mockup">
+          <div class="mockup__header">
+            <div class="mockup__header-left">
+              <span class="mockup__header-icon">📋</span>
+              <div>
+                <p class="mockup__header-title">My Day</p>
+                <p class="mockup__header-sub">{{ doneCount }} of {{ tasks().length }} done</p>
+              </div>
+            </div>
+            <div class="mockup__progress">
+              <div class="mockup__progress-bar">
+                <div
+                  class="mockup__progress-fill"
+                  [style.width.%]="(doneCount / tasks().length) * 100"
+                ></div>
+              </div>
+            </div>
+          </div>
+          <div class="mockup__body">
+            @for (task of tasks(); track task.text; let i = $index) {
+              <button
+                class="task"
+                [class.task--done]="task.done"
+                (click)="toggleTask(i)"
+                type="button"
+              >
+                <span class="task__checkbox" [class.task__checkbox--checked]="task.done">
+                  @if (task.done) {
+                    <svg width="9" height="7" viewBox="0 0 9 7" fill="none">
+                      <path d="M1 3.5L3.5 6L8 1" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                  }
+                </span>
+                <span class="task__text">{{ task.text }}</span>
+                @if (task.badge) {
+                  <span class="badge" [ngClass]="task.badgeClass!">{{ task.badge }}</span>
+                }
+              </button>
+            }
+            <div class="task task--add">
+              <span class="task__add-icon">+</span>
+              <span class="task__add-label">Add a task</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features (detailed) -->
+  <section class="features-detail" id="features">
+    <div class="features-detail__inner">
+      @for (feat of featureDetails; track feat.heading; let even = $even) {
+        <div class="feat-row" [class.feat-row--reversed]="!even">
+          <div class="feat-row__text">
+            <p class="feat-row__eyebrow">{{ feat.eyebrow }}</p>
+            <h2 class="feat-row__heading">{{ feat.heading }}</h2>
+            <p class="feat-row__desc">{{ feat.description }}</p>
+            <ul class="feat-row__bullets">
+              @for (b of feat.bullets; track b) {
+                <li class="feat-row__bullet">
+                  <span class="feat-row__bullet-dot"></span>
+                  {{ b }}
+                </li>
+              }
+            </ul>
+          </div>
+          <div class="feat-row__visual" [style.background]="feat.visual.color">
+            <span class="feat-row__visual-icon">{{ feat.visual.icon }}</span>
+            <span class="feat-row__visual-label">{{ feat.visual.label }}</span>
+          </div>
+        </div>
+      }
+    </div>
+  </section>
+
+  <!-- How it works -->
+  <section class="steps">
+    <div class="steps__inner">
+      <div class="steps__header">
+        <h2 class="steps__heading">Up and running in minutes</h2>
+        <p class="steps__subheading">Three simple steps to organize your whole life.</p>
+      </div>
+      <div class="steps__grid">
+        @for (step of steps; track step.number) {
+          <div class="step-card">
+            <span class="step-card__number">{{ step.number }}</span>
+            <h3 class="step-card__title">{{ step.title }}</h3>
+            <p class="step-card__description">{{ step.description }}</p>
+          </div>
+        }
+      </div>
+    </div>
+  </section>
+
+  <!-- Pricing -->
+  <section class="pricing" id="pricing">
+    <div class="pricing__inner">
+      <div class="pricing__header">
+        <p class="pricing__eyebrow">Pricing</p>
+        <h2 class="pricing__heading">Simple, honest pricing</h2>
+        <p class="pricing__subheading">No hidden fees. Cancel anytime.</p>
+      </div>
+      <div class="pricing__grid">
+        @for (plan of pricingPlans; track plan.name) {
+          <div class="plan" [class.plan--highlighted]="plan.highlighted">
+            @if (plan.highlighted) {
+              <span class="plan__badge">Most popular</span>
+            }
+            <h3 class="plan__name">{{ plan.name }}</h3>
+            <div class="plan__price-row">
+              <span class="plan__price">{{ plan.price }}</span>
+              <span class="plan__period">{{ plan.period }}</span>
+            </div>
+            <p class="plan__description">{{ plan.description }}</p>
+            <a
+              class="btn plan__cta"
+              [class.btn--primary]="plan.highlighted"
+              [class.btn--outline]="!plan.highlighted"
+              routerLink="/signup"
+            >{{ plan.cta }}</a>
+            <ul class="plan__features">
+              @for (f of plan.features; track f) {
+                <li class="plan__feature">
+                  <svg class="plan__feature-check" width="14" height="14" viewBox="0 0 14 14" fill="none">
+                    <circle cx="7" cy="7" r="7" [attr.fill]="plan.highlighted ? '#db4035' : '#e8e6e1'"/>
+                    <path d="M4 7.5L6 9.5L10 5" stroke="white" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                  {{ f }}
+                </li>
+              }
+            </ul>
+          </div>
+        }
+      </div>
+    </div>
+  </section>
+
+  <!-- Bottom CTA -->
+  <section class="cta-strip">
+    <div class="cta-strip__inner">
+      <h2 class="cta-strip__heading">Ready to get organized?</h2>
+      <p class="cta-strip__sub">Join thousands of teams shipping faster with Dodoist.</p>
+      <a class="btn btn--primary btn--lg" routerLink="/signup">Start for free — no card needed</a>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="footer__inner">
+      <span class="footer__logo">Dodoist</span>
+      <nav class="footer__links">
+        <a class="footer__link" href="#">Privacy</a>
+        <a class="footer__link" href="#">Terms</a>
+        <a class="footer__link" href="#">Status</a>
+        <a class="footer__link" href="#">GitHub</a>
+      </nav>
+      <p class="footer__copy">© 2025 Dodoist. All rights reserved.</p>
+    </div>
+  </footer>
+
+</div>
