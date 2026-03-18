@@ -1,0 +1,248 @@
+<div class="page" [formGroup]="form">
+
+  <!-- ── Top bar ───────────────────────────────────────────────────────────── -->
+  <header class="topbar">
+    <nav class="breadcrumb">
+      <a class="breadcrumb__item" routerLink="/">Dodoist</a>
+      <span class="breadcrumb__sep">›</span>
+      <a class="breadcrumb__item" routerLink="/">Projects</a>
+      <span class="breadcrumb__sep">›</span>
+      <span class="breadcrumb__item breadcrumb__item--current">New task</span>
+    </nav>
+  </header>
+
+  <!-- ── Body ─────────────────────────────────────────────────────────────── -->
+  <div class="body">
+    <div class="layout">
+
+      <!-- ── Main form column ─────────────────────────────────────────────── -->
+      <main class="main">
+
+        <div class="type-row">
+          @for (t of types; track t.value) {
+            <button
+              type="button"
+              class="type-chip"
+              [class.type-chip--active]="currentType.value === t.value"
+              [style.background]="currentType.value === t.value ? t.bg : ''"
+              [style.color]="currentType.value === t.value ? t.color : ''"
+              [style.border-color]="currentType.value === t.value ? 'transparent' : ''"
+              (click)="setType(t.value)"
+            >{{ t.emoji }} {{ t.label }}</button>
+          }
+        </div>
+
+        <div class="title-wrap">
+          <input
+            class="title-input"
+            [class.title-input--error]="titleInvalid"
+            type="text"
+            formControlName="title"
+            placeholder="Task title"
+            autocomplete="off"
+          />
+          @if (titleInvalid) {
+            <span class="field-error">Title is required.</span>
+          }
+        </div>
+
+        <div class="field-block">
+          <label class="field-label">Description</label>
+          <textarea
+            class="desc-textarea"
+            formControlName="description"
+            placeholder="Add a description, steps to reproduce, acceptance criteria…"
+          ></textarea>
+        </div>
+
+      </main>
+
+      <!-- ── Properties sidebar ───────────────────────────────────────────── -->
+      <aside class="sidebar">
+
+        <p class="sidebar__heading">Properties</p>
+
+        <div class="prop-group">
+
+          <div class="prop-row">
+            <span class="prop-name">Project</span>
+            <div class="prop-value">
+              <select class="prop-select" formControlName="project_id">
+                <option value="">Select project</option>
+                @for (p of mockProjects; track p) {
+                  <option [value]="p">{{ p }}</option>
+                }
+              </select>
+            </div>
+          </div>
+
+          <div class="prop-row prop-row--top">
+            <span class="prop-name">Status</span>
+            <div class="prop-chips">
+              @for (s of statuses; track s.value) {
+                <button
+                  type="button"
+                  class="badge-btn"
+                  [class.badge-btn--active]="currentStatus.value === s.value"
+                  [style.background]="currentStatus.value === s.value ? s.bg : ''"
+                  [style.color]="currentStatus.value === s.value ? s.color : ''"
+                  [style.border-color]="currentStatus.value === s.value ? 'transparent' : ''"
+                  (click)="setStatus(s.value)"
+                >{{ s.label }}</button>
+              }
+            </div>
+          </div>
+
+          <div class="prop-row prop-row--top">
+            <span class="prop-name">Priority</span>
+            <div class="prop-chips">
+              @for (p of priorities; track p.value) {
+                <button
+                  type="button"
+                  class="badge-btn"
+                  [class.badge-btn--active]="currentPriority.value === p.value"
+                  [style.background]="currentPriority.value === p.value ? p.bg : ''"
+                  [style.color]="currentPriority.value === p.value ? p.color : ''"
+                  [style.border-color]="currentPriority.value === p.value ? 'transparent' : ''"
+                  (click)="setPriority(p.value)"
+                >{{ p.emoji }} {{ p.label }}</button>
+              }
+            </div>
+          </div>
+
+          <div class="prop-row">
+            <span class="prop-name">Assignee</span>
+            <div class="prop-value">
+              <select class="prop-select" formControlName="assigned_to">
+                <option value="">Unassigned</option>
+                @for (u of mockUsers; track u) {
+                  <option [value]="u">{{ u }}</option>
+                }
+              </select>
+            </div>
+          </div>
+
+        </div>
+
+        <div class="prop-group">
+          <p class="prop-group__label">Planning</p>
+
+          <div class="prop-row">
+            <span class="prop-name">Sprint</span>
+            <div class="prop-value">
+              <select class="prop-select" formControlName="sprint_id">
+                <option value="">No sprint</option>
+                @for (s of mockSprints; track s) {
+                  <option [value]="s">{{ s }}</option>
+                }
+              </select>
+            </div>
+          </div>
+
+          <div class="prop-row">
+            <span class="prop-name">Board column</span>
+            <div class="prop-value">
+              <select class="prop-select" formControlName="board_column_id">
+                <option value="">Default</option>
+                @for (c of mockColumns; track c) {
+                  <option [value]="c">{{ c }}</option>
+                }
+              </select>
+            </div>
+          </div>
+
+          <div class="prop-row">
+            <span class="prop-name">Story pts</span>
+            <div class="prop-value">
+              <input
+                class="prop-input prop-input--short"
+                type="number"
+                formControlName="story_points"
+                min="0"
+                max="999"
+                placeholder="—"
+              />
+            </div>
+          </div>
+
+          <div class="prop-row">
+            <span class="prop-name">Start date</span>
+            <div class="prop-value">
+              <input class="prop-input" type="date" formControlName="start_date" />
+            </div>
+          </div>
+
+          <div class="prop-row">
+            <span class="prop-name">Due date</span>
+            <div class="prop-value">
+              <input class="prop-input" type="date" formControlName="due_date" />
+            </div>
+          </div>
+
+          <div class="prop-row">
+            <span class="prop-name">Reminder</span>
+            <div class="prop-value">
+              <input class="prop-input" type="datetime-local" formControlName="reminder_at" />
+            </div>
+          </div>
+
+        </div>
+
+        <div class="prop-group">
+          <p class="prop-group__label">Organization</p>
+
+          <div class="prop-row prop-row--top">
+            <span class="prop-name">Labels</span>
+            <div class="prop-chips prop-chips--wrap">
+              @for (l of mockLabels; track l) {
+                <button
+                  type="button"
+                  class="label-chip"
+                  [class.label-chip--active]="isLabelSelected(l)"
+                  (click)="toggleLabel(l)"
+                >{{ l }}</button>
+              }
+            </div>
+          </div>
+
+          <div class="prop-row">
+            <span class="prop-name">Parent task</span>
+            <div class="prop-value">
+              <input class="prop-input" type="text" formControlName="parent_task_id" placeholder="Search tasks…" />
+            </div>
+          </div>
+
+          <div class="prop-row prop-row--center">
+            <span class="prop-name">Private</span>
+            <div class="prop-value">
+              <label class="toggle">
+                <input type="checkbox" class="toggle__input" formControlName="is_private" />
+                <span class="toggle__track"></span>
+              </label>
+            </div>
+          </div>
+
+        </div>
+
+      </aside>
+
+    </div>
+  </div>
+
+  <!-- ── Footer actions ────────────────────────────────────────────────────── -->
+  <footer class="footer">
+    <div class="footer__inner">
+      <a class="btn btn--ghost" routerLink="/">Discard</a>
+      <div class="footer__right">
+        <button class="btn btn--outline" type="button" routerLink="/">Save draft</button>
+        <button class="btn btn--primary" type="button" (click)="submit()">
+          Create task
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+            <path d="M2.5 7h9M8 3.5 11.5 7 8 10.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </footer>
+
+</div>

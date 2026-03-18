@@ -22,5 +22,10 @@ export const routes: Routes = [
     loadComponent: () =>
       import('./pages/docs/docs.component').then(m => m.DocsComponent),
   },
+  {
+    path: 'task/new',
+    loadComponent: () =>
+      import('./pages/task-create/task-create.component').then(m => m.TaskCreateComponent),
+  },
   { path: '**', redirectTo: '' },
 ];
