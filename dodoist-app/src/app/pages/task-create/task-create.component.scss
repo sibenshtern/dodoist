@@ -310,6 +310,30 @@ $font-b: 'Manrope', sans-serif;
 input[type='date'].prop-input,
 input[type='datetime-local'].prop-input { color-scheme: light; }
 
+// ── Block props (Status / Priority — label above, chips wrap below) ───────────
+
+.block-prop {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+
+  &:last-child { margin-bottom: 0; }
+}
+
+.block-prop__label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: $gray;
+  line-height: 1.4;
+}
+
+.badge-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
 // ── Badge buttons ─────────────────────────────────────────────────────────────
 
 .badge-btn {

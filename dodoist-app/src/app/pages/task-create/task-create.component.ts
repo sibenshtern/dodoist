@@ -8,7 +8,6 @@ export type TaskStatus   = 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'd
 
 interface TypeMeta     { value: TaskType;     label: string; emoji: string; bg: string; color: string; }
 interface PriorityMeta { value: TaskPriority; label: string; emoji: string; bg: string; color: string; }
-interface StatusMeta   { value: TaskStatus;   label: string; bg: string; color: string; }
 
 @Component({
   selector: 'app-task-create',
@@ -54,14 +53,6 @@ export class TaskCreateComponent {
     { value: 'none',     label: 'No priority', emoji: '—',  bg: '#f0eee9', color: '#8a8680' },
   ];
 
-  readonly statuses: StatusMeta[] = [
-    { value: 'backlog',     label: 'Backlog',     bg: '#f0eee9', color: '#8a8680' },
-    { value: 'todo',        label: 'To Do',       bg: '#f0eee9', color: '#1a1814' },
-    { value: 'in_progress', label: 'In Progress', bg: '#ebf2fd', color: '#246fe0' },
-    { value: 'in_review',   label: 'In Review',   bg: '#f3eeff', color: '#7c3aed' },
-    { value: 'done',        label: 'Done',        bg: '#f0fdf4', color: '#15803d' },
-    { value: 'cancelled',   label: 'Cancelled',   bg: '#fff0ef', color: '#db4035' },
-  ];
 
   // TODO: replace with GET /workspaces/{workspaceId}/projects
   readonly mockProjects = ['Dodoist Web', 'Dodoist Mobile', 'Design System'];
@@ -69,24 +60,20 @@ export class TaskCreateComponent {
   readonly mockUsers    = ['Alice Johnson', 'Bob Chen', 'Carol Davis'];
   // TODO: replace with GET /projects/{projectId}/sprints?status=active,planned
   readonly mockSprints  = ['Sprint 5 (Mar 3–17)', 'Sprint 6 (Mar 17–31)'];
-  // TODO: replace with GET /boards/{boardId}/columns
-  readonly mockColumns  = ['Backlog', 'To Do', 'In Progress', 'In Review', 'Done'];
-  // TODO: replace with GET /workspaces/{workspaceId}/labels
+// TODO: replace with GET /workspaces/{workspaceId}/labels
   readonly mockLabels   = ['Authentication', 'Backend', 'Frontend', 'Bug', 'Enhancement', 'Security', 'Docs'];
 
   selectedLabelIds = signal<string[]>([]);
 
   get currentType():     TypeMeta     { return this.types.find(t => t.value === this.form.controls.type.value)!; }
-  get currentStatus():   StatusMeta   { return this.statuses.find(s => s.value === this.form.controls.status.value)!; }
-  get currentPriority(): PriorityMeta { return this.priorities.find(p => p.value === this.form.controls.priority.value)!; }
+get currentPriority(): PriorityMeta { return this.priorities.find(p => p.value === this.form.controls.priority.value)!; }
   get titleInvalid():    boolean {
     const c = this.form.controls.title;
     return c.invalid && (c.dirty || c.touched);
   }
 
   setType(v: TaskType):         void { this.form.controls.type.setValue(v); }
-  setStatus(v: TaskStatus):     void { this.form.controls.status.setValue(v); }
-  setPriority(v: TaskPriority): void { this.form.controls.priority.setValue(v); }
+setPriority(v: TaskPriority): void { this.form.controls.priority.setValue(v); }
 
   toggleLabel(label: string): void {
     this.selectedLabelIds.update(ids =>

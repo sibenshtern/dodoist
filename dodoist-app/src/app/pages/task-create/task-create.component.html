@@ -76,26 +76,9 @@
             </div>
           </div>
 
-          <div class="prop-row prop-row--top">
-            <span class="prop-name">Status</span>
-            <div class="prop-chips">
-              @for (s of statuses; track s.value) {
-                <button
-                  type="button"
-                  class="badge-btn"
-                  [class.badge-btn--active]="currentStatus.value === s.value"
-                  [style.background]="currentStatus.value === s.value ? s.bg : ''"
-                  [style.color]="currentStatus.value === s.value ? s.color : ''"
-                  [style.border-color]="currentStatus.value === s.value ? 'transparent' : ''"
-                  (click)="setStatus(s.value)"
-                >{{ s.label }}</button>
-              }
-            </div>
-          </div>
-
-          <div class="prop-row prop-row--top">
-            <span class="prop-name">Priority</span>
-            <div class="prop-chips">
+          <div class="block-prop">
+            <span class="block-prop__label">Priority</span>
+            <div class="badge-wrap">
               @for (p of priorities; track p.value) {
                 <button
                   type="button"
@@ -134,18 +117,6 @@
                 <option value="">No sprint</option>
                 @for (s of mockSprints; track s) {
                   <option [value]="s">{{ s }}</option>
-                }
-              </select>
-            </div>
-          </div>
-
-          <div class="prop-row">
-            <span class="prop-name">Board column</span>
-            <div class="prop-value">
-              <select class="prop-select" formControlName="board_column_id">
-                <option value="">Default</option>
-                @for (c of mockColumns; track c) {
-                  <option [value]="c">{{ c }}</option>
                 }
               </select>
             </div>
