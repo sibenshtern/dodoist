@@ -1,0 +1,128 @@
+<div class="auth-page">
+  <div class="card">
+
+    <a class="card__logo" routerLink="/">Dodoist</a>
+
+    <h1 class="card__heading">Create your account</h1>
+    <p class="card__subtext">Free forever. No credit card required.</p>
+
+    <form class="form" [formGroup]="form" (ngSubmit)="submit()">
+
+      <div class="field">
+        <label class="field__label" for="signup-name">Full name</label>
+        <input
+          id="signup-name"
+          class="field__input"
+          [class.field__input--error]="nameInvalid"
+          type="text"
+          formControlName="name"
+          placeholder="Alice Johnson"
+          autocomplete="name"
+        />
+        @if (nameInvalid) {
+          <span class="field__error">
+            @if (form.controls.name.hasError('required')) { Name is required. }
+            @else { Name must be at least 2 characters. }
+          </span>
+        }
+      </div>
+
+      <div class="field">
+        <label class="field__label" for="signup-email">Email address</label>
+        <input
+          id="signup-email"
+          class="field__input"
+          [class.field__input--error]="emailInvalid"
+          type="email"
+          formControlName="email"
+          placeholder="alice@example.com"
+          autocomplete="email"
+        />
+        @if (emailInvalid) {
+          <span class="field__error">
+            @if (form.controls.email.hasError('required')) { Email is required. }
+            @else { Enter a valid email address. }
+          </span>
+        }
+      </div>
+
+      <div class="field">
+        <label class="field__label" for="signup-password">
+          Password <span class="field__label-hint">min 8 characters</span>
+        </label>
+        <div class="field__input-wrap">
+          <input
+            id="signup-password"
+            class="field__input field__input--padded"
+            [class.field__input--error]="passwordInvalid"
+            [type]="showPassword() ? 'text' : 'password'"
+            formControlName="password"
+            placeholder="••••••••"
+            autocomplete="new-password"
+          />
+          <button
+            type="button"
+            class="field__eye"
+            (click)="showPassword.set(!showPassword())"
+            [attr.aria-label]="showPassword() ? 'Hide password' : 'Show password'"
+          >
+            @if (showPassword()) {
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8a8680" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+                <line x1="1" y1="1" x2="23" y2="23"/>
+              </svg>
+            } @else {
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8a8680" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                <circle cx="12" cy="12" r="3"/>
+              </svg>
+            }
+          </button>
+        </div>
+        @if (passwordInvalid) {
+          <span class="field__error">
+            @if (form.controls.password.hasError('required')) { Password is required. }
+            @else { Password must be at least 8 characters. }
+          </span>
+        }
+      </div>
+
+      <div class="field">
+        <label class="field__label" for="signup-timezone">Timezone</label>
+        <select
+          id="signup-timezone"
+          class="field__select"
+          formControlName="timezone"
+        >
+          @for (tz of timezones; track tz) {
+            <option [value]="tz">{{ tz }}</option>
+          }
+        </select>
+      </div>
+
+      <button
+        tuiButton
+        type="submit"
+        appearance="primary"
+        size="l"
+        class="submit-btn"
+      >
+        Create account
+      </button>
+
+    </form>
+
+    <p class="card__footer">
+      By signing up you agree to our
+      <a class="card__footer-link" href="#">Terms</a>
+      and
+      <a class="card__footer-link" href="#">Privacy Policy</a>.
+    </p>
+
+    <p class="card__footer card__footer--spaced">
+      Already have an account?
+      <a class="card__footer-link" routerLink="/login">Sign in</a>
+    </p>
+
+  </div>
+</div>
