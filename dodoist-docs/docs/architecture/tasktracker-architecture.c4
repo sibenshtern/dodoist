@@ -1,0 +1,93 @@
+specification {
+
+  element actor {
+    style {
+      shape person
+      color green
+    }
+  }
+  element system
+  element container
+  element database
+
+  tag restApi
+}
+
+model {
+
+  actor endUser 'End User' {
+    description 'Manages personal and work tasks.'
+  }
+
+  actor systemAdmin 'System Administrator' {
+    description 'Manages users, workspaces, and global configuration.'
+  }
+
+  system taskTracker 'Task Tracker' {
+    description 'Hybrid personal/work task tracker with project management, agile boards, sprints, and analytics.'
+
+    container angularSpa 'Angular SPA' {
+      description 'Browser client. Implements all UI and communicates with the backend via REST API.'
+      technology 'Angular, TypeScript'
+    }
+
+    container djangoApi 'Django REST API' {
+      description 'Stateless API server. Handles business logic, permissions, and JWT authentication.'
+      technology 'Django, Django REST Framework'
+    }
+
+    container postgresDb 'PostgreSQL' {
+      description 'Primary relational data store.'
+      technology 'PostgreSQL 16'
+    }
+  }
+
+  endUser     -> taskTracker.angularSpa 'Uses via browser'
+  systemAdmin -> taskTracker.angularSpa 'Administers via browser'
+
+  taskTracker.angularSpa -> taskTracker.djangoApi 'HTTPS REST API (Bearer JWT)' #restApi
+  taskTracker.djangoApi  -> taskTracker.postgresDb 'Reads / writes data'
+}
+
+views {
+
+  view systemContext of taskTracker {
+    title 'C1 — Task Tracker: System Context'
+
+    include endUser, systemAdmin, taskTracker
+
+    style endUser, systemAdmin {
+      shape person
+      color green
+    }
+    style taskTracker {
+      color blue
+    }
+  }
+
+  view containers of taskTracker {
+    title 'C2 — Task Tracker: Containers'
+
+    include
+      endUser,
+      systemAdmin,
+      taskTracker.angularSpa,
+      taskTracker.djangoApi,
+      taskTracker.postgresDb
+
+    style endUser, systemAdmin {
+      shape person
+      color green
+    }
+    style taskTracker.angularSpa {
+      color green
+    }
+    style taskTracker.djangoApi {
+      color blue
+    }
+    style taskTracker.postgresDb {
+      color indigo
+      shape storage
+    }
+  }
+}

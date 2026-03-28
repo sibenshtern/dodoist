@@ -1,0 +1,2 @@
+My project is a task tracker that allows you to combine both work and personal tasks. 
+It combines Todoist and Jira, with the ability to view and build analytics on projects, tasks, and individual users. 

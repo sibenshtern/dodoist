@@ -1,0 +1,417 @@
+// ============================================================
+//  TASK TRACKER — DATABASE SCHEMA v1.0
+//  Hybrid personal/work tracker (Todoist + Jira style)
+// ============================================================
+
+// ─────────────────────────────────────────
+//  DOMAIN 1 — IDENTITY & ACCESS
+// ─────────────────────────────────────────
+
+Table users {
+  id            uuid        [pk, default: `gen_random_uuid()`]
+  email         varchar     [unique, not null]
+  display_name  varchar     [not null]
+  avatar_url    varchar
+  timezone      varchar     [default: 'UTC']
+  global_role   varchar     [not null, default: 'member', note: 'enum: SA | GA | member']
+  password_hash varchar     [not null]
+  is_active     boolean     [not null, default: true]
+  created_at    timestamptz [not null, default: `now()`]
+  updated_at    timestamptz [not null, default: `now()`]
+  last_login_at timestamptz
+
+  note: 'Central identity record. SA and GA bypass all project-level permission checks.'
+}
+
+Table user_sessions {
+  id           uuid        [pk, default: `gen_random_uuid()`]
+  user_id      uuid        [not null, ref: > users.id]
+  token_hash   varchar     [not null]
+  device_info  varchar
+  ip_address   inet
+  expires_at   timestamptz [not null]
+  created_at   timestamptz [not null, default: `now()`]
+}
+
+Table user_preferences {
+  id                    uuid        [pk, default: `gen_random_uuid()`]
+  user_id               uuid        [unique, not null, ref: - users.id]
+  theme                 varchar     [default: 'system', note: 'enum: light | dark | system']
+  language              varchar     [default: 'en']
+  notification_channels jsonb       [note: 'array: email | push | in_app']
+  digest_frequency      varchar     [default: 'realtime', note: 'enum: realtime | daily | weekly']
+  default_view          varchar     [default: 'list', note: 'enum: list | board | calendar']
+  updated_at            timestamptz [not null, default: `now()`]
+}
+
+
+// ─────────────────────────────────────────
+//  DOMAIN 2 — ORGANIZATION
+// ─────────────────────────────────────────
+
+Table workspaces {
+  id          uuid        [pk, default: `gen_random_uuid()`]
+  slug        varchar     [unique, not null]
+  name        varchar     [not null]
+  description text
+  owner_id    uuid        [not null, ref: > users.id]
+  plan        varchar     [not null, default: 'free', note: 'enum: free | pro | business']
+  is_personal boolean     [not null, default: false, note: 'true = auto-created personal workspace']
+  created_at  timestamptz [not null, default: `now()`]
+  updated_at  timestamptz [not null, default: `now()`]
+}
+
+Table workspace_members {
+  id           uuid        [pk, default: `gen_random_uuid()`]
+  workspace_id uuid        [not null, ref: > workspaces.id]
+  user_id      uuid        [not null, ref: > users.id]
+  joined_at    timestamptz [not null, default: `now()`]
+
+  indexes {
+    (workspace_id, user_id) [unique]
+  }
+}
+
+Table projects {
+  id          uuid        [pk, default: `gen_random_uuid()`]
+  workspace_id uuid       [not null, ref: > workspaces.id]
+  name        varchar     [not null]
+  description text
+  key         varchar     [not null, note: 'Short code, unique per workspace (e.g. PROJ)']
+  color       varchar
+  icon_url    varchar
+  status      varchar     [not null, default: 'active', note: 'enum: active | archived | deleted']
+  type        varchar     [not null, default: 'kanban', note: 'enum: scrum | kanban | personal']
+  is_private  boolean     [not null, default: false]
+  created_by  uuid        [not null, ref: > users.id]
+  created_at  timestamptz [not null, default: `now()`]
+  updated_at  timestamptz [not null, default: `now()`]
+  archived_at timestamptz
+
+  indexes {
+    (workspace_id, key) [unique]
+  }
+}
+
+Table project_members {
+  id          uuid        [pk, default: `gen_random_uuid()`]
+  project_id  uuid        [not null, ref: > projects.id]
+  user_id     uuid        [not null, ref: > users.id]
+  role        varchar     [not null, note: 'enum: PO | PM | DEV | VW | GU']
+  invited_by  uuid        [ref: > users.id]
+  joined_at   timestamptz [not null, default: `now()`]
+  updated_at  timestamptz [not null, default: `now()`]
+
+  indexes {
+    (project_id, user_id) [unique]
+  }
+
+  note: 'Project-scoped role. A user may hold different roles across projects.'
+}
+
+Table labels {
+  id           uuid        [pk, default: `gen_random_uuid()`]
+  workspace_id uuid        [not null, ref: > workspaces.id]
+  name         varchar     [not null]
+  color        varchar     [not null]
+  created_by   uuid        [not null, ref: > users.id]
+  created_at   timestamptz [not null, default: `now()`]
+
+  indexes {
+    (workspace_id, name) [unique]
+  }
+}
+
+
+// ─────────────────────────────────────────
+//  DOMAIN 3 — WORK
+// ─────────────────────────────────────────
+
+Table tasks {
+  id               uuid        [pk, default: `gen_random_uuid()`]
+  project_id       uuid        [not null, ref: > projects.id]
+  parent_task_id   uuid        [ref: > tasks.id, note: 'Nullable — set for subtasks']
+  sprint_id        uuid        [ref: > sprints.id]
+  board_column_id  uuid        [ref: > board_columns.id]
+  created_by       uuid        [not null, ref: > users.id]
+  assigned_to      uuid        [ref: > users.id, note: 'Primary assignee; additional via task_assignments']
+  title            varchar     [not null]
+  description      jsonb       [note: 'Rich text as ProseMirror JSON']
+  type             varchar     [not null, default: 'task', note: 'enum: task | bug | story | epic | personal']
+  status           varchar     [not null, default: 'todo', note: 'enum: backlog | todo | in_progress | in_review | done | cancelled']
+  priority         varchar     [not null, default: 'none', note: 'enum: critical | high | medium | low | none']
+  story_points     int
+  due_date         timestamptz
+  start_date       timestamptz
+  reminder_at      timestamptz
+  position         float8      [not null, default: 0, note: 'Float for drag-and-drop ordering']
+  is_private       boolean     [not null, default: false]
+  created_at       timestamptz [not null, default: `now()`]
+  updated_at       timestamptz [not null, default: `now()`]
+  completed_at     timestamptz
+  deleted_at       timestamptz [note: 'Soft delete']
+
+  indexes {
+    project_id
+    assigned_to
+    status
+    due_date
+    deleted_at
+  }
+}
+
+Table task_assignments {
+  id          uuid        [pk, default: `gen_random_uuid()`]
+  task_id     uuid        [not null, ref: > tasks.id]
+  user_id     uuid        [not null, ref: > users.id]
+  assigned_by uuid        [not null, ref: > users.id]
+  assigned_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (task_id, user_id) [unique]
+  }
+
+  note: 'Additional assignees beyond tasks.assigned_to.'
+}
+
+Table task_labels {
+  task_id  uuid [not null, ref: > tasks.id]
+  label_id uuid [not null, ref: > labels.id]
+
+  indexes {
+    (task_id, label_id) [pk]
+  }
+}
+
+Table task_dependencies {
+  id                uuid        [pk, default: `gen_random_uuid()`]
+  task_id           uuid        [not null, ref: > tasks.id]
+  depends_on_task_id uuid       [not null, ref: > tasks.id]
+  type              varchar     [not null, note: 'enum: blocks | is_blocked_by | relates_to | duplicates | is_duplicated_by']
+  created_by        uuid        [not null, ref: > users.id]
+  created_at        timestamptz [not null, default: `now()`]
+}
+
+Table task_guest_access {
+  id         uuid        [pk, default: `gen_random_uuid()`]
+  task_id    uuid        [not null, ref: > tasks.id]
+  user_id    uuid        [not null, ref: > users.id]
+  granted_by uuid        [not null, ref: > users.id]
+  granted_at timestamptz [not null, default: `now()`]
+  expires_at timestamptz
+
+  indexes {
+    (task_id, user_id) [unique]
+  }
+
+  note: 'Explicit per-task visibility grants for GU (Guest) role users.'
+}
+
+Table custom_fields {
+  id          uuid        [pk, default: `gen_random_uuid()`]
+  project_id  uuid        [not null, ref: > projects.id]
+  name        varchar     [not null]
+  field_type  varchar     [not null, note: 'enum: text | number | date | select | multi_select | user | url']
+  options     jsonb       [note: 'For select / multi_select types']
+  is_required boolean     [not null, default: false]
+  position    int         [not null, default: 0]
+  created_by  uuid        [not null, ref: > users.id]
+  created_at  timestamptz [not null, default: `now()`]
+}
+
+Table task_custom_field_values {
+  id              uuid        [pk, default: `gen_random_uuid()`]
+  task_id         uuid        [not null, ref: > tasks.id]
+  custom_field_id uuid        [not null, ref: > custom_fields.id]
+  value           text
+  updated_at      timestamptz [not null, default: `now()`]
+
+  indexes {
+    (task_id, custom_field_id) [unique]
+  }
+}
+
+
+// ─────────────────────────────────────────
+//  DOMAIN 4 — COLLABORATION
+// ─────────────────────────────────────────
+
+Table comments {
+  id                uuid        [pk, default: `gen_random_uuid()`]
+  task_id           uuid        [not null, ref: > tasks.id]
+  author_id         uuid        [not null, ref: > users.id]
+  parent_comment_id uuid        [ref: > comments.id, note: 'Nullable — set for threaded replies']
+  body              jsonb       [not null, note: 'Rich text as ProseMirror JSON']
+  is_edited         boolean     [not null, default: false]
+  created_at        timestamptz [not null, default: `now()`]
+  updated_at        timestamptz [not null, default: `now()`]
+  deleted_at        timestamptz [note: 'Soft delete']
+}
+
+Table attachments {
+  id              uuid        [pk, default: `gen_random_uuid()`]
+  task_id         uuid        [ref: > tasks.id]
+  comment_id      uuid        [ref: > comments.id]
+  uploaded_by     uuid        [not null, ref: > users.id]
+  filename        varchar     [not null]
+  file_size_bytes bigint      [not null]
+  mime_type       varchar     [not null]
+  storage_key     varchar     [not null, note: 'Object storage path (S3/GCS)']
+  created_at      timestamptz [not null, default: `now()`]
+
+  note: 'At least one of task_id or comment_id must be set.'
+}
+
+Table reactions {
+  id         uuid        [pk, default: `gen_random_uuid()`]
+  comment_id uuid        [not null, ref: > comments.id]
+  user_id    uuid        [not null, ref: > users.id]
+  emoji      varchar     [not null]
+  created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (comment_id, user_id, emoji) [unique]
+  }
+}
+
+Table notifications {
+  id         uuid        [pk, default: `gen_random_uuid()`]
+  recipient_id uuid      [not null, ref: > users.id]
+  actor_id   uuid        [ref: > users.id]
+  type       varchar     [not null, note: 'enum: assigned | mentioned | commented | status_changed | due_soon | overdue | invited | role_changed']
+  task_id    uuid        [ref: > tasks.id]
+  project_id uuid        [ref: > projects.id]
+  message    text        [not null]
+  is_read    boolean     [not null, default: false]
+  created_at timestamptz [not null, default: `now()`]
+  read_at    timestamptz
+
+  indexes {
+    recipient_id
+    (recipient_id, is_read)
+  }
+}
+
+Table activity_log {
+  id          uuid        [pk, default: `gen_random_uuid()`]
+  entity_type varchar     [not null, note: 'enum: task | project | sprint | comment']
+  entity_id   uuid        [not null]
+  actor_id    uuid        [not null, ref: > users.id]
+  action      varchar     [not null, note: 'e.g. status_changed, assigned, commented']
+  old_value   jsonb
+  new_value   jsonb
+  project_id  uuid        [ref: > projects.id]
+  created_at  timestamptz [not null, default: `now()`]
+
+  indexes {
+    (entity_type, entity_id)
+    project_id
+    actor_id
+    created_at
+  }
+
+  note: 'Immutable audit trail. Source of truth for event-driven analytics.'
+}
+
+
+// ─────────────────────────────────────────
+//  DOMAIN 5 — PLANNING
+// ─────────────────────────────────────────
+
+Table sprints {
+  id           uuid        [pk, default: `gen_random_uuid()`]
+  project_id   uuid        [not null, ref: > projects.id]
+  name         varchar     [not null]
+  goal         text
+  status       varchar     [not null, default: 'planned', note: 'enum: planned | active | completed']
+  start_date   date
+  end_date     date
+  created_by   uuid        [not null, ref: > users.id]
+  created_at   timestamptz [not null, default: `now()`]
+  updated_at   timestamptz [not null, default: `now()`]
+  completed_at timestamptz
+
+  note: 'Only one sprint per project may have status=active at a time (enforced at app layer).'
+}
+
+Table boards {
+  id          uuid        [pk, default: `gen_random_uuid()`]
+  project_id  uuid        [not null, ref: > projects.id]
+  name        varchar     [not null]
+  type        varchar     [not null, default: 'kanban', note: 'enum: kanban | scrum']
+  is_default  boolean     [not null, default: false]
+  created_by  uuid        [not null, ref: > users.id]
+  created_at  timestamptz [not null, default: `now()`]
+  updated_at  timestamptz [not null, default: `now()`]
+}
+
+Table board_columns {
+  id             uuid        [pk, default: `gen_random_uuid()`]
+  board_id       uuid        [not null, ref: > boards.id]
+  name           varchar     [not null]
+  status_mapping varchar     [not null, note: 'enum: backlog | todo | in_progress | in_review | done | cancelled']
+  position       int         [not null]
+  wip_limit      int         [note: 'Nullable — max tasks allowed in column (WIP limit)']
+  created_at     timestamptz [not null, default: `now()`]
+  updated_at     timestamptz [not null, default: `now()`]
+}
+
+
+// ─────────────────────────────────────────
+//  DOMAIN 6 — ANALYTICS
+// ─────────────────────────────────────────
+
+Table time_logs {
+  id              uuid        [pk, default: `gen_random_uuid()`]
+  task_id         uuid        [not null, ref: > tasks.id]
+  user_id         uuid        [not null, ref: > users.id]
+  logged_minutes  int         [not null]
+  description     text
+  logged_date     date        [not null]
+  created_at      timestamptz [not null, default: `now()`]
+  updated_at      timestamptz [not null, default: `now()`]
+
+  indexes {
+    task_id
+    (user_id, logged_date)
+  }
+}
+
+Table task_snapshots {
+  id                      uuid        [pk, default: `gen_random_uuid()`]
+  project_id              uuid        [not null, ref: > projects.id]
+  sprint_id               uuid        [ref: > sprints.id]
+  snapshot_date           date        [not null]
+  total_tasks             int         [not null, default: 0]
+  completed_tasks         int         [not null, default: 0]
+  in_progress_tasks       int         [not null, default: 0]
+  overdue_tasks           int         [not null, default: 0]
+  total_story_points      int         [not null, default: 0]
+  completed_story_points  int         [not null, default: 0]
+  created_at              timestamptz [not null, default: `now()`]
+
+  indexes {
+    (project_id, sprint_id, snapshot_date) [unique]
+  }
+
+  note: 'Pre-aggregated nightly. Powers burndown charts and velocity tracking.'
+}
+
+Table user_metrics {
+  id               uuid        [pk, default: `gen_random_uuid()`]
+  user_id          uuid        [not null, ref: > users.id]
+  project_id       uuid        [ref: > projects.id, note: 'Nullable — NULL = across all projects']
+  metric_date      date        [not null]
+  tasks_created    int         [not null, default: 0]
+  tasks_completed  int         [not null, default: 0]
+  tasks_assigned   int         [not null, default: 0]
+  comments_posted  int         [not null, default: 0]
+  logged_minutes   int         [not null, default: 0]
+  created_at       timestamptz [not null, default: `now()`]
+
+  indexes {
+    (user_id, project_id, metric_date) [unique]
+  }
+
+  note: 'Pre-aggregated daily. Powers individual performance and workload dashboards.'
+}

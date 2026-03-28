@@ -1,0 +1,279 @@
+================================================================================
+  TASK TRACKER — DATABASE ENTITIES DESCRIPTION v1.0
+  Hybrid personal/work tracker (Todoist + Jira style) with analytics
+================================================================================
+
+OVERVIEW
+--------
+The data model is organized into six logical domains:
+  1. Identity & Access    — users, authentication, sessions, global roles
+  2. Organization         — workspaces, projects, membership, project roles
+  3. Work                 — tasks, subtasks, dependencies, assignments
+  4. Collaboration        — comments, attachments, notifications, activity log
+  5. Planning             — sprints, boards, board columns
+  6. Analytics            — time logs, task snapshots, aggregated metrics
+
+
+================================================================================
+  DOMAIN 1 — IDENTITY & ACCESS
+================================================================================
+
+users
+  Central identity record. Holds profile data, global role, and account status.
+  Fields: id, email (unique), display_name, avatar_url, timezone, global_role
+          [enum: SA | GA | member], password_hash, is_active, created_at,
+          updated_at, last_login_at.
+  Notes:  global_role SA and GA bypass all project-level permission checks.
+          Members have no system-wide privileges by default.
+
+user_sessions
+  Tracks active authentication tokens for web and mobile clients.
+  Fields: id, user_id → users, token_hash, device_info, ip_address,
+          expires_at, created_at.
+
+user_preferences
+  Per-user UI and notification settings stored as a flexible key-value map.
+  Fields: id, user_id → users (unique), theme, language, notification_channels
+          [json array: email | push | in_app], digest_frequency
+          [enum: realtime | daily | weekly], default_view
+          [enum: list | board | calendar], updated_at.
+
+
+================================================================================
+  DOMAIN 2 — ORGANIZATION
+================================================================================
+
+workspaces
+  Top-level container grouping projects. Can represent a company, team, or
+  personal space. Every project belongs to exactly one workspace.
+  Fields: id, slug (unique), name, description, owner_id → users, plan
+          [enum: free | pro | business], is_personal (bool), created_at,
+          updated_at.
+  Notes:  is_personal=true designates the auto-created private workspace for
+          personal (Todoist-style) tasks. Users can have one personal workspace
+          and multiple shared workspaces.
+
+workspace_members
+  Membership of users within a workspace (prerequisite to project membership).
+  Fields: id, workspace_id → workspaces, user_id → users, joined_at.
+  Unique: (workspace_id, user_id).
+
+projects
+  A project is the primary container for tasks. Can be work-oriented (Jira-
+  style with sprints and boards) or personal (Todoist-style flat task list).
+  Fields: id, workspace_id → workspaces, name, description, key (short code,
+          unique per workspace), color, icon_url, status
+          [enum: active | archived | deleted], type
+          [enum: scrum | kanban | personal], is_private (bool), created_by →
+          users, created_at, updated_at, archived_at.
+
+project_members
+  Assigns a project-scoped role to a user within a specific project.
+  A user can hold different roles across different projects.
+  Fields: id, project_id → projects, user_id → users, role
+          [enum: PO | PM | DEV | VW | GU], invited_by → users,
+          joined_at, updated_at.
+  Unique: (project_id, user_id).
+  Notes:  Guests (GU) must also be explicitly linked to tasks via
+          task_guest_access to see individual tasks.
+
+labels
+  Reusable color-coded tags scoped to a workspace. Used for filtering and
+  analytics across projects.
+  Fields: id, workspace_id → workspaces, name, color, created_by → users,
+          created_at.
+  Unique: (workspace_id, name).
+
+
+================================================================================
+  DOMAIN 3 — WORK
+================================================================================
+
+tasks
+  Core entity. Represents a unit of work in either a personal or project
+  context. Supports Jira-style issue tracking and Todoist-style personal todos.
+  Fields: id, project_id → projects, parent_task_id → tasks (nullable,
+          for subtasks), sprint_id → sprints (nullable), board_column_id →
+          board_columns (nullable), created_by → users, assigned_to → users
+          (nullable), title, description (rich text), type
+          [enum: task | bug | story | epic | personal], status
+          [enum: backlog | todo | in_progress | in_review | done | cancelled],
+          priority [enum: critical | high | medium | low | none], story_points
+          (int, nullable), due_date, start_date, reminder_at, position (float,
+          for ordering), is_private (bool), created_at, updated_at,
+          completed_at, deleted_at (soft delete).
+  Notes:  parent_task_id enables unlimited subtask depth (application enforces
+          practical limits). is_private tasks within shared projects are visible
+          only to their creator and assignee.
+
+task_assignments
+  Supports multiple assignees per task. The primary assignee is still stored
+  on tasks.assigned_to for quick queries; this table tracks additional ones.
+  Fields: id, task_id → tasks, user_id → users, assigned_by → users,
+          assigned_at.
+  Unique: (task_id, user_id).
+
+task_labels
+  Many-to-many join between tasks and labels.
+  Fields: task_id → tasks, label_id → labels.
+  Primary key: (task_id, label_id).
+
+task_dependencies
+  Tracks inter-task dependency relationships (e.g., "blocked by", "duplicates").
+  Fields: id, task_id → tasks, depends_on_task_id → tasks, type
+          [enum: blocks | is_blocked_by | relates_to | duplicates |
+          is_duplicated_by], created_by → users, created_at.
+
+task_guest_access
+  Explicit access grants for Guest-role users to individual tasks.
+  Fields: id, task_id → tasks, user_id → users, granted_by → users,
+          granted_at, expires_at (nullable).
+  Unique: (task_id, user_id).
+
+custom_fields
+  Project-level custom field definitions (e.g., "Environment", "Customer").
+  Fields: id, project_id → projects, name, field_type
+          [enum: text | number | date | select | multi_select | user | url],
+          options (json, for select types), is_required (bool), position (int),
+          created_by → users, created_at.
+
+task_custom_field_values
+  Stores actual values for custom fields on each task.
+  Fields: id, task_id → tasks, custom_field_id → custom_fields, value (text),
+          updated_at.
+  Unique: (task_id, custom_field_id).
+
+
+================================================================================
+  DOMAIN 4 — COLLABORATION
+================================================================================
+
+comments
+  Threaded comments on tasks. Supports top-level comments and replies.
+  Fields: id, task_id → tasks, author_id → users, parent_comment_id →
+          comments (nullable, for replies), body (rich text),
+          is_edited (bool), created_at, updated_at, deleted_at (soft delete).
+
+attachments
+  Files attached to tasks or comments, stored via external object storage.
+  Fields: id, task_id → tasks (nullable), comment_id → comments (nullable),
+          uploaded_by → users, filename, file_size_bytes, mime_type,
+          storage_key (S3/GCS path), created_at.
+
+reactions
+  Emoji reactions on comments.
+  Fields: id, comment_id → comments, user_id → users, emoji (text),
+          created_at.
+  Unique: (comment_id, user_id, emoji).
+
+notifications
+  In-app notifications for events: assignments, mentions, due dates, etc.
+  Fields: id, recipient_id → users, actor_id → users (nullable), type
+          [enum: assigned | mentioned | commented | status_changed |
+          due_soon | overdue | invited | role_changed], task_id → tasks
+          (nullable), project_id → projects (nullable), message (text),
+          is_read (bool), created_at, read_at.
+
+activity_log
+  Immutable audit trail of all significant changes to tasks and projects.
+  Used for history views and analytics.
+  Fields: id, entity_type [enum: task | project | sprint | comment],
+          entity_id (uuid), actor_id → users, action (text, e.g.
+          "status_changed"), old_value (json), new_value (json),
+          project_id → projects (nullable), created_at.
+
+
+================================================================================
+  DOMAIN 5 — PLANNING
+================================================================================
+
+sprints
+  Time-boxed iterations for Scrum-type projects.
+  Fields: id, project_id → projects, name, goal, status
+          [enum: planned | active | completed], start_date, end_date,
+          created_by → users, created_at, updated_at, completed_at.
+  Notes:  Only one sprint per project may have status=active at a time.
+          Tasks reference sprint_id directly.
+
+boards
+  Kanban or Scrum board for a project. A project can have multiple boards
+  (e.g., one per team or workflow).
+  Fields: id, project_id → projects, name, type
+          [enum: kanban | scrum], is_default (bool), created_by → users,
+          created_at, updated_at.
+
+board_columns
+  Ordered columns on a board representing workflow stages.
+  Fields: id, board_id → boards, name, status_mapping
+          [enum: backlog | todo | in_progress | in_review | done | cancelled],
+          position (int), wip_limit (int, nullable), created_at, updated_at.
+  Notes:  status_mapping links a column to the canonical task status enum,
+          allowing multiple columns to map to the same status.
+
+
+================================================================================
+  DOMAIN 6 — ANALYTICS
+================================================================================
+
+time_logs
+  Work time manually logged against a task by a user.
+  Fields: id, task_id → tasks, user_id → users, logged_minutes (int),
+          description (text, nullable), logged_date (date), created_at,
+          updated_at.
+
+task_snapshots
+  Periodic point-in-time captures of task metrics per project, used for
+  burndown charts, velocity tracking, and trend analysis.
+  Fields: id, project_id → projects, sprint_id → sprints (nullable),
+          snapshot_date (date), total_tasks (int), completed_tasks (int),
+          in_progress_tasks (int), overdue_tasks (int), total_story_points
+          (int), completed_story_points (int), created_at.
+  Unique: (project_id, sprint_id, snapshot_date).
+
+user_metrics
+  Pre-aggregated daily metrics per user per project, powering individual
+  performance analytics and workload dashboards.
+  Fields: id, user_id → users, project_id → projects (nullable), metric_date
+          (date), tasks_created (int), tasks_completed (int),
+          tasks_assigned (int), comments_posted (int), logged_minutes (int),
+          created_at.
+  Unique: (user_id, project_id, metric_date).
+
+
+================================================================================
+  KEY DESIGN DECISIONS
+================================================================================
+
+1. PERSONAL vs. WORK TASKS
+   Personal tasks live in a personal workspace (is_personal=true) under a
+   project of type=personal. They follow the same task schema, enabling unified
+   search, labels, due dates, and analytics across all task types.
+
+2. PERMISSION ENFORCEMENT
+   Enforced in the application layer by evaluating:
+   - users.global_role (SA/GA bypass project checks)
+   - project_members.role (PO/PM/DEV/VW/GU per project)
+   - tasks.created_by / task_assignments (for DEV edit-own-task logic)
+   - task_guest_access (for GU per-task visibility)
+
+3. SOFT DELETES
+   tasks, comments use deleted_at timestamps instead of hard deletes to
+   preserve activity_log integrity and support undo/recovery.
+
+4. ORDERING
+   tasks.position (float) allows drag-and-drop reordering without renumbering
+   all rows. board_columns.position (int) uses integer ordering.
+
+5. ANALYTICS STRATEGY
+   activity_log is the source of truth for event-driven data.
+   task_snapshots and user_metrics are pre-aggregated asynchronously
+   (nightly job or event-triggered) to keep dashboard queries fast.
+
+6. RICH TEXT
+   tasks.description and comments.body are stored as a serialized document
+   format (e.g., ProseMirror JSON) to support mentions, embeds, and formatting.
+
+
+================================================================================
+  END OF DOCUMENT
+================================================================================

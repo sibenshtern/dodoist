@@ -1,0 +1,271 @@
+@import url('https://fonts.googleapis.com/css2?family=Lora:wght@400;600;700&family=Manrope:wght@400;500;600;700;800&display=swap');
+
+/* LikeC4 diagram styles */
+@import '@likec4/diagram/styles-xyflow.css';
+@import '@likec4/diagram/styles-min.css';
+
+/* ── Dodoist brand colors (Infima palette) ───────────────────────────────── */
+:root {
+  --ifm-color-primary:          #db4035;
+  --ifm-color-primary-dark:     #c5392e;
+  --ifm-color-primary-darker:   #bb362b;
+  --ifm-color-primary-darkest:  #9e2d23;
+  --ifm-color-primary-light:    #df5349;
+  --ifm-color-primary-lighter:  #e15d53;
+  --ifm-color-primary-lightest: #e67f7a;
+
+  --ifm-font-family-base:    'Manrope', -apple-system, BlinkMacSystemFont, sans-serif;
+  --ifm-heading-font-family: 'Lora', Georgia, serif;
+
+  --ifm-background-color:         #ffffff;
+  --ifm-background-surface-color: #f7f6f3;
+
+  --ifm-color-content:           #1a1814;
+  --ifm-color-content-secondary: #8a8680;
+
+  --ifm-navbar-background-color: #ffffff;
+  --ifm-navbar-shadow:           0 1px 0 0 #e8e6e1;
+  --ifm-navbar-height:           58px;
+
+  --ifm-footer-background-color: #1a1814;
+  --ifm-footer-color:            #b0aea9;
+  --ifm-footer-link-color:       #b0aea9;
+  --ifm-footer-link-hover-color: #ffffff;
+  --ifm-footer-title-color:      #ffffff;
+
+  --ifm-toc-border-color:   #e8e6e1;
+  --ifm-hr-border-color:    #e8e6e1;
+  --ifm-table-border-color: #e8e6e1;
+  --ifm-code-font-size:     93%;
+  --ifm-border-radius:      6px;
+
+  --docusaurus-highlighted-code-line-bg: rgba(219, 64, 53, 0.08);
+}
+
+/* ── Dark mode ────────────────────────────────────────────────────────────── */
+[data-theme='dark'] {
+  --ifm-color-primary:          #e57a73;
+  --ifm-color-primary-dark:     #df6158;
+  --ifm-color-primary-darker:   #db5549;
+  --ifm-color-primary-darkest:  #d02e22;
+  --ifm-color-primary-light:    #e99390;
+  --ifm-color-primary-lighter:  #ec9f9b;
+  --ifm-color-primary-lightest: #f2bfbc;
+
+  --ifm-background-color:         #131120;
+  --ifm-background-surface-color: #1a1828;
+
+  --ifm-color-content:           #ede8dc;
+  --ifm-color-content-secondary: #7e7a90;
+
+  --ifm-navbar-background-color: #0d0b14;
+  --ifm-navbar-shadow:           0 1px 0 0 rgba(237, 232, 220, 0.07);
+
+  --ifm-footer-background-color: #07060c;
+  --ifm-toc-border-color:        rgba(237, 232, 220, 0.07);
+
+  --docusaurus-highlighted-code-line-bg: rgba(229, 122, 115, 0.15);
+}
+
+/* ── Navbar ───────────────────────────────────────────────────────────────── */
+
+.navbar__title {
+  font-family: 'Manrope', sans-serif;
+  font-weight: 800;
+  font-size: 18px;
+  color: var(--ifm-color-primary);
+  letter-spacing: -0.3px;
+}
+
+.navbar__link {
+  font-weight: 600;
+  font-size: 13.5px;
+}
+
+/* ── Hero section ─────────────────────────────────────────────────────────── */
+
+.hero--dodoist {
+  background: #edebe6;
+  border-bottom: 1px solid #e8e6e1;
+  padding: 72px 0 80px;
+}
+
+[data-theme='dark'] .hero--dodoist {
+  background: #0d0b14;
+  border-bottom-color: rgba(237, 232, 220, 0.07);
+}
+
+.hero__pretitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--ifm-color-primary);
+  background: rgba(219, 64, 53, 0.08);
+  border: 1px solid rgba(219, 64, 53, 0.2);
+  border-radius: 100px;
+  padding: 4px 12px;
+  margin-bottom: 20px;
+}
+
+.hero__title--dodoist {
+  font-family: 'Lora', Georgia, serif !important;
+  font-size: 52px !important;
+  font-weight: 700 !important;
+  color: #1a1814 !important;
+  line-height: 1.15 !important;
+  margin-bottom: 20px !important;
+  letter-spacing: -0.5px;
+}
+
+[data-theme='dark'] .hero__title--dodoist {
+  color: #ede8dc !important;
+}
+
+.hero__subtitle--dodoist {
+  font-size: 17px !important;
+  color: #8a8680 !important;
+  line-height: 1.65 !important;
+  max-width: 520px;
+  margin: 0 auto 36px !important;
+}
+
+[data-theme='dark'] .hero__subtitle--dodoist {
+  color: #7e7a90 !important;
+}
+
+.hero__cta-group {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.btn--hero-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 22px;
+  background: #db4035;
+  color: #ffffff !important;
+  border-radius: 6px;
+  font-family: 'Manrope', sans-serif;
+  font-weight: 700;
+  font-size: 14px;
+  text-decoration: none !important;
+  transition: opacity 0.15s;
+  border: none;
+}
+.btn--hero-primary:hover { opacity: 0.88; color: #ffffff !important; }
+
+.btn--hero-outline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 22px;
+  background: #ffffff;
+  color: #1a1814 !important;
+  border: 1.5px solid #e8e6e1;
+  border-radius: 6px;
+  font-family: 'Manrope', sans-serif;
+  font-weight: 700;
+  font-size: 14px;
+  text-decoration: none !important;
+  transition: border-color 0.15s, background 0.15s;
+}
+.btn--hero-outline:hover { border-color: #ccc9c4; background: #f7f6f3; color: #1a1814 !important; }
+
+[data-theme='dark'] .btn--hero-outline {
+  background: transparent;
+  color: #ede8dc !important;
+  border-color: rgba(237, 232, 220, 0.14);
+}
+[data-theme='dark'] .btn--hero-outline:hover {
+  background: rgba(237, 232, 220, 0.06);
+}
+
+/* ── Feature cards ────────────────────────────────────────────────────────── */
+
+.features-section {
+  padding: 64px 0 72px;
+  background: #ffffff;
+}
+
+[data-theme='dark'] .features-section {
+  background: #131120;
+}
+
+.feature-card {
+  padding: 28px;
+  border: 1.111px solid #e8e6e1;
+  border-radius: 12px;
+  background: #fafaf8;
+  height: 100%;
+  transition: box-shadow 0.15s;
+}
+
+[data-theme='dark'] .feature-card {
+  background: #1a1828;
+  border-color: rgba(237, 232, 220, 0.07);
+}
+
+.feature-card:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.07);
+}
+
+.feature-card__icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  margin-bottom: 16px;
+}
+
+.feature-card__title {
+  font-family: 'Lora', Georgia, serif;
+  font-size: 18px;
+  font-weight: 700;
+  color: #1a1814;
+  margin: 0 0 8px;
+}
+
+[data-theme='dark'] .feature-card__title {
+  color: #ede8dc;
+}
+
+.feature-card__desc {
+  font-size: 14px;
+  color: #8a8680;
+  line-height: 1.65;
+  margin: 0;
+}
+
+[data-theme='dark'] .feature-card__desc {
+  color: #7e7a90;
+}
+
+/* ── Sidebar & content typography ────────────────────────────────────────── */
+
+article h1, article h2, article h3, article h4 {
+  font-family: 'Lora', Georgia, serif;
+}
+
+.menu__link--active {
+  font-weight: 700;
+}
+
+/* ── Admonition tints ─────────────────────────────────────────────────────── */
+
+.alert--info    { --ifm-alert-background-color: #ebf2fd; --ifm-alert-border-color: #246fe0; }
+.alert--success { --ifm-alert-background-color: #f0fdf4; --ifm-alert-border-color: #15803d; }
+.alert--warning { --ifm-alert-background-color: #fefce8; --ifm-alert-border-color: #a16207; }
+.alert--danger  { --ifm-alert-background-color: #fff0ef; --ifm-alert-border-color: #db4035; }
