@@ -23,6 +23,11 @@ export const routes: Routes = [
       import('./pages/docs/docs.component').then(m => m.DocsComponent),
   },
   {
+    path: 'home',
+    loadComponent: () =>
+      import('./pages/home/home.component').then(m => m.HomeComponent),
+  },
+  {
     path: 'task/new',
     loadComponent: () =>
       import('./pages/task-create/task-create.component').then(m => m.TaskCreateComponent),
