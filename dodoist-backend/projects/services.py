@@ -20,6 +20,7 @@ from .models import (
     TaskStatus,
     Workspace,
     WorkspaceMember,
+    WorkspacePlan,
 )
 
 _DEFAULT_COLUMNS = [
@@ -47,10 +48,6 @@ def _unique_slug(base: str) -> str:
     return candidate
 
 
-# ---------------------------------------------------------------------------
-# WorkspaceService
-# ---------------------------------------------------------------------------
-
 class WorkspaceService:
     @staticmethod
     @transaction.atomic
@@ -67,11 +64,19 @@ class WorkspaceService:
 
     @staticmethod
     @transaction.atomic
-    def create_workspace(owner: User, name: str, slug: str | None = None) -> Workspace:
+    def create_workspace(
+        owner: User,
+        name: str,
+        slug: str | None = None,
+        description: str = "",
+        plan: str = WorkspacePlan.FREE,
+    ) -> Workspace:
         slug = slug or _unique_slug(name)
         if Workspace.objects.filter(slug=slug).exists():
             raise ValueError(f"Slug '{slug}' is already taken.")
-        ws = Workspace.objects.create(slug=slug, name=name, owner=owner)
+        ws = Workspace.objects.create(
+            slug=slug, name=name, owner=owner, description=description, plan=plan
+        )
         WorkspaceMember.objects.create(workspace=ws, user=owner)
         return ws
 
@@ -86,10 +91,6 @@ class WorkspaceService:
             raise ValueError("Cannot remove the workspace owner.")
         WorkspaceMember.objects.filter(workspace=workspace, user=user).delete()
 
-
-# ---------------------------------------------------------------------------
-# ProjectService
-# ---------------------------------------------------------------------------
 
 class ProjectService:
     @staticmethod
@@ -183,10 +184,6 @@ class ProjectService:
             raise ValueError("Cannot remove the project owner.")
         ProjectMember.objects.filter(project=project, user=user).delete()
 
-
-# ---------------------------------------------------------------------------
-# SprintService
-# ---------------------------------------------------------------------------
 
 class SprintService:
     @staticmethod
