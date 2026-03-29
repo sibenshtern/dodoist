@@ -1,0 +1,261 @@
+<div class="page">
+
+  <!-- ── Sidebar ─────────────────────────────────────────────────────────── -->
+  <aside class="sidebar">
+
+    <div class="sidebar__brand">
+      <div class="brand-mark">D</div>
+      <span class="brand-name">Dodoist</span>
+    </div>
+
+    <button class="workspace-switcher">
+      <div class="workspace-icon">{{ workspaceName()[0] }}</div>
+      <div class="workspace-info">
+        <span class="workspace-name">{{ workspaceName() }}</span>
+        <span class="workspace-plan">{{ workspacePlan() }}</span>
+      </div>
+      <tui-icon icon="@tui.chevron-down" class="workspace-chevron" />
+    </button>
+
+    <nav class="nav">
+      @for (item of navItems; track item.path) {
+        <a
+          class="nav__item"
+          [routerLink]="item.path"
+          [class.nav__item--active]="activeNav() === item.path"
+          (click)="activeNav.set(item.path)"
+        >
+          <tui-icon [icon]="item.icon" class="nav__icon" />
+          {{ item.label }}
+        </a>
+      }
+    </nav>
+
+    <div class="sidebar-section">
+      <span class="sidebar-section__label">Projects</span>
+      @for (project of projects(); track project.id) {
+        <button class="project-nav-item">
+          <span class="project-nav-dot" [style.background]="project.color"></span>
+          {{ project.name }}
+        </button>
+      }
+    </div>
+
+    <div class="sidebar__footer">
+      <button class="nav__item">
+        <tui-icon icon="@tui.bell" class="nav__icon" />
+        Notifications
+      </button>
+      <button class="nav__item">
+        <tui-icon icon="@tui.settings" class="nav__icon" />
+        Settings
+      </button>
+      <div class="user-row">
+        <div class="user-avatar">{{ currentUserInitials() }}</div>
+        <span class="user-name">{{ currentUserName() }}</span>
+      </div>
+    </div>
+
+  </aside>
+
+  <!-- ── Main content ────────────────────────────────────────────────────── -->
+  <main class="main">
+    <div class="content">
+
+      <!-- Page header -->
+      <header class="page-header">
+        <div>
+          <h1 class="greeting">{{ greeting() }}</h1>
+          <p class="subheading">
+            {{ today | date:'EEEE, MMMM d' }}
+            @if (todayDueCount() > 0) {
+              · <span class="due-highlight">{{ todayDueCount() }} task{{ todayDueCount() === 1 ? '' : 's' }} due today</span>
+            }
+          </p>
+        </div>
+        <a class="btn btn--primary" routerLink="/task/new">+ New Task</a>
+      </header>
+
+      <!-- Stats row -->
+      @if (stats(); as s) {
+        <div class="stats-grid">
+          <div class="stat-card">
+            <span class="stat-card__value" style="color: #db4035">{{ s.openTasks }}</span>
+            <span class="stat-card__label">Open Tasks</span>
+            <span class="stat-card__delta">
+              <span class="delta delta--up">↑{{ s.openTasksDelta }}</span> from yesterday
+            </span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-card__value" style="color: #299438">{{ s.doneThisWeek }}</span>
+            <span class="stat-card__label">Done this week</span>
+            <span class="stat-card__delta">
+              <span class="delta delta--up">↑{{ s.doneThisWeekDeltaPct }}%</span> vs last week
+            </span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-card__value" style="color: #246fe0">{{ s.storyPoints }}</span>
+            <span class="stat-card__label">Story Points</span>
+            <span class="stat-card__delta stat-card__delta--progress">
+              <div class="mini-progress">
+                <div
+                  class="mini-progress__fill"
+                  [style.width.%]="sprintProgressPct()"
+                  style="background: #246fe0"
+                ></div>
+              </div>
+              {{ sprintProgressPct() }}% of sprint
+            </span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-card__value" style="color: #7c3aed">{{ s.overdue }}</span>
+            <span class="stat-card__label">Overdue</span>
+            <span class="stat-card__delta stat-card__delta--warn">Needs attention</span>
+          </div>
+        </div>
+      }
+
+      <!-- Content grid -->
+      <div class="content-grid">
+
+        <!-- Left column -->
+        <div class="col-main">
+
+          <!-- Today's Tasks -->
+          <section class="panel">
+            <div class="panel__header">
+              <h2 class="panel__title">Today's tasks</h2>
+              <a class="panel__action" routerLink="/tasks">View all</a>
+            </div>
+            <div class="task-list">
+              @for (task of todayTasks(); track task.id) {
+                <div class="task-item" [class.task-item--done]="task.done">
+                  <button
+                    class="task-check"
+                    [class.task-check--checked]="task.done"
+                    (click)="toggleTask(task.id)"
+                    [attr.aria-label]="task.done ? 'Mark incomplete' : 'Mark complete'"
+                  >
+                    @if (task.done) {
+                      <tui-icon icon="@tui.check" class="check-icon" />
+                    }
+                  </button>
+                  <span class="task-title">{{ task.title }}</span>
+                  <span
+                    class="task-badge"
+                    [style.color]="task.labelColor"
+                    [style.background]="task.labelBg"
+                  >{{ task.label }}</span>
+                  <span
+                    class="task-due"
+                    [class.task-due--overdue]="task.dueLabel === 'Yesterday'"
+                  >{{ task.dueLabel }}</span>
+                </div>
+              }
+            </div>
+          </section>
+
+          <!-- Projects -->
+          <section class="panel">
+            <div class="panel__header">
+              <h2 class="panel__title">Projects</h2>
+              <a class="panel__action" routerLink="/projects">View all</a>
+            </div>
+            <div class="project-cards">
+              @for (project of projects(); track project.id) {
+                <div class="project-card">
+                  <div class="project-card__row">
+                    <div class="project-card__info">
+                      <div class="project-dot" [style.background]="project.color"></div>
+                      <span class="project-name">{{ project.name }}</span>
+                      <span class="project-tasks">{{ project.openTasks }} tasks</span>
+                    </div>
+                    <span class="project-pct">{{ project.progress }}%</span>
+                  </div>
+                  <div class="progress-bar">
+                    <div
+                      class="progress-bar__fill"
+                      [style.width.%]="project.progress"
+                      [style.background]="project.color"
+                    ></div>
+                  </div>
+                </div>
+              }
+            </div>
+          </section>
+
+        </div>
+
+        <!-- Right column -->
+        <div class="col-aside">
+
+          <!-- Sprint Progress -->
+          @if (activeSprint(); as sprint) {
+            <section class="panel">
+              <div class="panel__header">
+                <h2 class="panel__title">{{ sprint.name }} Progress</h2>
+                <span class="sprint-days">{{ sprint.daysLeft }} days left</span>
+              </div>
+              <div class="sprint-body">
+                <div class="sprint-pts">
+                  <span class="sprint-pts__done">{{ sprint.storyPointsDone }}</span>
+                  <span class="sprint-pts__sep">/</span>
+                  <span class="sprint-pts__total">{{ sprint.storyPointsTotal }} pts</span>
+                </div>
+                <div class="progress-bar progress-bar--lg">
+                  <div
+                    class="progress-bar__fill"
+                    [style.width.%]="sprintProgressPct()"
+                    style="background: #246fe0"
+                  ></div>
+                </div>
+                <div class="sprint-stats">
+                  <div class="sprint-stat">
+                    <span class="sprint-stat__dot" style="background: #299438"></span>
+                    <span class="sprint-stat__count">{{ sprint.done }}</span>
+                    <span class="sprint-stat__label">Done</span>
+                  </div>
+                  <div class="sprint-stat">
+                    <span class="sprint-stat__dot" style="background: #ff9800"></span>
+                    <span class="sprint-stat__count">{{ sprint.inProgress }}</span>
+                    <span class="sprint-stat__label">In progress</span>
+                  </div>
+                  <div class="sprint-stat">
+                    <span class="sprint-stat__dot" style="background: #db4035"></span>
+                    <span class="sprint-stat__count">{{ sprint.blocked }}</span>
+                    <span class="sprint-stat__label">Blocked</span>
+                  </div>
+                </div>
+              </div>
+            </section>
+          }
+
+          <!-- Recent Activity -->
+          <section class="panel">
+            <div class="panel__header">
+              <h2 class="panel__title">Recent Activity</h2>
+            </div>
+            <div class="activity-list">
+              @for (item of activity(); track item.id) {
+                <div class="activity-item">
+                  <div class="activity-avatar">{{ initials(item.actorName) }}</div>
+                  <div class="activity-content">
+                    <p class="activity-text">
+                      <strong>{{ item.actorName }}</strong>
+                      {{ item.action }}
+                      <span class="activity-target">{{ item.target }}</span>
+                    </p>
+                    <span class="activity-time">{{ item.timeAgo }}</span>
+                  </div>
+                </div>
+              }
+            </div>
+          </section>
+
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+</div>
