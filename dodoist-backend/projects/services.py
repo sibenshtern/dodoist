@@ -102,6 +102,8 @@ class ProjectService:
         key: str,
         project_type: str = ProjectType.KANBAN,
         is_private: bool = False,
+        description: str = "",
+        color: str = "",
     ) -> Project:
         if not creator.has_elevated_access():
             if not WorkspaceMember.objects.filter(workspace=workspace, user=creator).exists():
@@ -117,6 +119,8 @@ class ProjectService:
             type=project_type,
             is_private=is_private,
             created_by=creator,
+            description=description,
+            color=color,
         )
 
         ProjectMember.objects.create(project=project, user=creator, role=ProjectRole.PO)

@@ -1,5 +1,6 @@
 import pytest
 from django.utils import timezone
+from rest_framework.test import APIClient
 
 from projects.models import Label, ProjectMember, ProjectRole, ProjectStatus, ProjectType, TaskStatus
 from projects.services import ProjectService, WorkspaceService
@@ -11,6 +12,7 @@ from tasks.models import (
     DependencyType,
     Task,
     TaskAssignment,
+    TaskDependency,
     TaskGuestAccess,
     TaskLabel,
     TaskPriority,
@@ -393,3 +395,699 @@ class TestAccessControlService:
         )
         TaskService.grant_guest_access(private_task, other_user, granted_by=user)
         assert AccessControlService.can_view_task(other_user, private_task) is True
+
+
+# ===========================================================================
+# Shared fixtures for view tests
+# ===========================================================================
+
+@pytest.fixture
+def api_client():
+    return APIClient()
+
+
+@pytest.fixture
+def auth_client(api_client, user):
+    api_client.force_authenticate(user=user)
+    return api_client
+
+
+@pytest.fixture
+def sa_user(db):
+    return User.objects.create_user(
+        email="sa@example.com", password="pass123", display_name="SA",
+        global_role=GlobalRole.SA,
+    )
+
+
+@pytest.fixture
+def pm_user(db, workspace, project):
+    u = UserService.register(email="pm@example.com", password="pass123", display_name="PM")
+    WorkspaceService.add_member(workspace, u)
+    ProjectService.add_member(project, u, ProjectRole.PM)
+    return u
+
+
+@pytest.fixture
+def dev_user(db, workspace, project):
+    u = UserService.register(email="dev@example.com", password="pass123", display_name="Dev")
+    WorkspaceService.add_member(workspace, u)
+    ProjectService.add_member(project, u, ProjectRole.DEV)
+    return u
+
+
+@pytest.fixture
+def viewer_user(db, workspace, project):
+    u = UserService.register(email="viewer@example.com", password="pass123", display_name="Viewer")
+    WorkspaceService.add_member(workspace, u)
+    ProjectService.add_member(project, u, ProjectRole.VW)
+    return u
+
+
+@pytest.fixture
+def guest_user(db, workspace, project):
+    u = UserService.register(email="guest@example.com", password="pass123", display_name="Guest")
+    WorkspaceService.add_member(workspace, u)
+    ProjectService.add_member(project, u, ProjectRole.GU)
+    return u
+
+
+@pytest.fixture
+def label(workspace, user):
+    return Label.objects.create(workspace=workspace, name="bug", color="#ff0000", created_by=user)
+
+
+# ===========================================================================
+# API: ProjectTaskListCreateView  GET /api/projects/<pk>/tasks/
+# ===========================================================================
+
+@pytest.mark.django_db
+class TestProjectTaskListView:
+    def url(self, project):
+        return f"/api/projects/{project.pk}/tasks/"
+
+    def test_unauthenticated_returns_401(self, api_client, project):
+        response = api_client.get(self.url(project))
+        assert response.status_code == 401
+
+    def test_member_can_list_tasks(self, auth_client, project, task):
+        response = auth_client.get(self.url(project))
+        assert response.status_code == 200
+        assert any(str(task.pk) == t["id"] for t in response.data)
+
+    def test_non_member_gets_404(self, api_client, project, other_user):
+        api_client.force_authenticate(user=other_user)
+        response = api_client.get(self.url(project))
+        assert response.status_code == 404
+
+    def test_sa_can_list_without_membership(self, api_client, sa_user, project, task):
+        api_client.force_authenticate(user=sa_user)
+        response = api_client.get(self.url(project))
+        assert response.status_code == 200
+
+    def test_deleted_tasks_excluded(self, auth_client, project, task, user):
+        TaskService.soft_delete(task, user)
+        response = auth_client.get(self.url(project))
+        assert response.status_code == 200
+        assert not any(str(task.pk) == t["id"] for t in response.data)
+
+    def test_status_filter_single(self, auth_client, project, task, user):
+        TaskService.update_status(task, TaskStatus.IN_PROGRESS, user)
+        response = auth_client.get(self.url(project), {"status": "in_progress"})
+        assert response.status_code == 200
+        assert all(t["status"] == "in_progress" for t in response.data)
+
+    def test_status_filter_comma_separated(self, auth_client, project, user):
+        t1 = TaskService.create_task(project=project, creator=user, title="T1")
+        t2 = TaskService.create_task(project=project, creator=user, title="T2")
+        TaskService.update_status(t1, TaskStatus.TODO, user)
+        TaskService.update_status(t2, TaskStatus.IN_PROGRESS, user)
+        response = auth_client.get(self.url(project), {"status": "todo,in_progress"})
+        assert response.status_code == 200
+        returned_statuses = {t["status"] for t in response.data}
+        assert returned_statuses <= {"todo", "in_progress"}
+
+    def test_priority_filter_comma_separated(self, auth_client, project, user):
+        TaskService.create_task(project=project, creator=user, title="Hi", priority=TaskPriority.HIGH)
+        TaskService.create_task(project=project, creator=user, title="Lo", priority=TaskPriority.LOW)
+        response = auth_client.get(self.url(project), {"priority": "high,low"})
+        assert response.status_code == 200
+        returned_priorities = {t["priority"] for t in response.data}
+        assert returned_priorities <= {"high", "low"}
+
+    def test_assigned_to_filter(self, auth_client, project, task, user, other_user):
+        WorkspaceService.add_member(task.project.workspace, other_user)
+        ProjectService.add_member(project, other_user, ProjectRole.DEV)
+        TaskService.assign_user(task, other_user, assigned_by=user)
+        response = auth_client.get(self.url(project), {"assigned_to": str(other_user.pk)})
+        assert response.status_code == 200
+        assert len(response.data) == 1
+        assert response.data[0]["id"] == str(task.pk)
+
+    def test_search_filter(self, auth_client, project, user):
+        TaskService.create_task(project=project, creator=user, title="OAuth login")
+        TaskService.create_task(project=project, creator=user, title="Fix styling")
+        response = auth_client.get(self.url(project), {"search": "OAuth"})
+        assert response.status_code == 200
+        assert len(response.data) == 1
+        assert response.data[0]["title"] == "OAuth login"
+
+    def test_parent_task_id_null_returns_root_tasks(self, auth_client, project, task, user):
+        subtask = TaskService.create_task(project=project, creator=user, title="Sub", parent_task=task)
+        response = auth_client.get(self.url(project), {"parent_task_id": "null"})
+        assert response.status_code == 200
+        returned_ids = {t["id"] for t in response.data}
+        assert str(task.pk) in returned_ids
+        assert str(subtask.pk) not in returned_ids
+
+    def test_parent_task_id_filter_returns_subtasks(self, auth_client, project, task, user):
+        subtask = TaskService.create_task(project=project, creator=user, title="Sub", parent_task=task)
+        other = TaskService.create_task(project=project, creator=user, title="Other")
+        response = auth_client.get(self.url(project), {"parent_task_id": str(task.pk)})
+        assert response.status_code == 200
+        returned_ids = {t["id"] for t in response.data}
+        assert str(subtask.pk) in returned_ids
+        assert str(other.pk) not in returned_ids
+
+    def test_label_ids_filter(self, auth_client, project, task, label):
+        TaskService.add_label(task, label)
+        other = TaskService.create_task(project=task.project, creator=task.created_by, title="No label")
+        response = auth_client.get(self.url(project), {"label_ids": str(label.pk)})
+        assert response.status_code == 200
+        returned_ids = {t["id"] for t in response.data}
+        assert str(task.pk) in returned_ids
+        assert str(other.pk) not in returned_ids
+
+    def test_sort_dir_desc(self, auth_client, project, user):
+        t1 = TaskService.create_task(project=project, creator=user, title="First")
+        t2 = TaskService.create_task(project=project, creator=user, title="Second")
+        response = auth_client.get(self.url(project), {"sort_by": "created_at", "sort_dir": "desc"})
+        assert response.status_code == 200
+        ids = [t["id"] for t in response.data]
+        assert ids.index(str(t2.pk)) < ids.index(str(t1.pk))
+
+    def test_invalid_sort_by_still_returns_200(self, auth_client, project):
+        response = auth_client.get(self.url(project), {"sort_by": "injected_field"})
+        assert response.status_code == 200
+
+    def test_guest_cannot_see_private_tasks(self, api_client, project, task, guest_user, user):
+        task.is_private = True
+        task.save(update_fields=["is_private"])
+        api_client.force_authenticate(user=guest_user)
+        response = api_client.get(self.url(project))
+        assert response.status_code == 200
+        assert not any(str(task.pk) == t["id"] for t in response.data)
+
+    def test_nonexistent_project_returns_404(self, auth_client):
+        response = auth_client.get("/api/projects/00000000-0000-0000-0000-000000000000/tasks/")
+        assert response.status_code == 404
+
+
+# ===========================================================================
+# API: ProjectTaskListCreateView  POST /api/projects/<pk>/tasks/
+# ===========================================================================
+
+@pytest.mark.django_db
+class TestProjectTaskCreateView:
+    def url(self, project):
+        return f"/api/projects/{project.pk}/tasks/"
+
+    def test_unauthenticated_returns_401(self, api_client, project):
+        response = api_client.post(self.url(project), {"title": "X"})
+        assert response.status_code == 401
+
+    def test_po_can_create_task(self, auth_client, project):
+        response = auth_client.post(self.url(project), {"title": "New task", "task_type": "task", "priority": "none"})
+        assert response.status_code == 201
+        assert response.data["title"] == "New task"
+        assert str(response.data["project"]) == str(project.pk)
+
+    def test_dev_can_create_task(self, api_client, project, dev_user):
+        api_client.force_authenticate(user=dev_user)
+        response = api_client.post(self.url(project), {"title": "Dev task", "task_type": "bug", "priority": "high"})
+        assert response.status_code == 201
+
+    def test_viewer_cannot_create_task(self, api_client, project, viewer_user):
+        api_client.force_authenticate(user=viewer_user)
+        response = api_client.post(self.url(project), {"title": "X"})
+        assert response.status_code == 403
+
+    def test_guest_cannot_create_task(self, api_client, project, guest_user):
+        api_client.force_authenticate(user=guest_user)
+        response = api_client.post(self.url(project), {"title": "X"})
+        assert response.status_code == 403
+
+    def test_non_member_gets_404(self, api_client, project, other_user):
+        api_client.force_authenticate(user=other_user)
+        response = api_client.post(self.url(project), {"title": "X"})
+        assert response.status_code == 404
+
+    def test_missing_title_returns_400(self, auth_client, project):
+        response = auth_client.post(self.url(project), {"priority": "high"})
+        assert response.status_code == 400
+
+    def test_create_subtask_with_parent_task_id(self, auth_client, project, task):
+        response = auth_client.post(self.url(project), {"title": "Sub", "parent_task_id": str(task.pk)})
+        assert response.status_code == 201
+        assert str(response.data["parent_task"]) == str(task.pk)
+
+    def test_invalid_parent_task_id_returns_400(self, auth_client, project):
+        response = auth_client.post(
+            self.url(project), {"title": "X", "parent_task_id": "00000000-0000-0000-0000-000000000000"}
+        )
+        assert response.status_code == 400
+
+    def test_sa_can_create_without_membership(self, api_client, sa_user, project):
+        api_client.force_authenticate(user=sa_user)
+        response = api_client.post(self.url(project), {"title": "SA task"})
+        assert response.status_code == 201
+
+    def test_inactive_project_returns_400(self, auth_client, project, user):
+        ProjectService.archive_project(project)
+        response = auth_client.post(self.url(project), {"title": "X"})
+        assert response.status_code == 400
+
+
+# ===========================================================================
+# API: TaskSubtaskListView  GET /api/tasks/<pk>/subtasks/
+# ===========================================================================
+
+@pytest.mark.django_db
+class TestTaskSubtaskListView:
+    def url(self, task):
+        return f"/api/tasks/{task.pk}/subtasks/"
+
+    def test_unauthenticated_returns_401(self, api_client, task):
+        response = api_client.get(self.url(task))
+        assert response.status_code == 401
+
+    def test_member_can_list_subtasks(self, auth_client, project, task, user):
+        subtask = TaskService.create_task(project=project, creator=user, title="Sub", parent_task=task)
+        response = auth_client.get(self.url(task))
+        assert response.status_code == 200
+        assert any(str(subtask.pk) == t["id"] for t in response.data)
+
+    def test_top_level_tasks_excluded(self, auth_client, project, task, user):
+        other = TaskService.create_task(project=project, creator=user, title="Other")
+        response = auth_client.get(self.url(task))
+        assert response.status_code == 200
+        assert not any(str(other.pk) == t["id"] for t in response.data)
+
+    def test_deleted_subtasks_excluded(self, auth_client, project, task, user):
+        subtask = TaskService.create_task(project=project, creator=user, title="Sub", parent_task=task)
+        TaskService.soft_delete(subtask, user)
+        response = auth_client.get(self.url(task))
+        assert response.status_code == 200
+        assert not any(str(subtask.pk) == t["id"] for t in response.data)
+
+    def test_status_filter(self, auth_client, project, task, user):
+        s1 = TaskService.create_task(project=project, creator=user, title="S1", parent_task=task)
+        s2 = TaskService.create_task(project=project, creator=user, title="S2", parent_task=task)
+        TaskService.update_status(s1, TaskStatus.DONE, user)
+        response = auth_client.get(self.url(task), {"status": "done"})
+        assert response.status_code == 200
+        assert len(response.data) == 1
+        assert response.data[0]["id"] == str(s1.pk)
+
+    def test_non_member_gets_404(self, api_client, task, other_user):
+        api_client.force_authenticate(user=other_user)
+        response = api_client.get(self.url(task))
+        assert response.status_code == 404
+
+    def test_nonexistent_task_returns_404(self, auth_client):
+        response = auth_client.get("/api/tasks/00000000-0000-0000-0000-000000000000/subtasks/")
+        assert response.status_code == 404
+
+
+# ===========================================================================
+# API: TaskAssignmentListView  POST /api/tasks/<pk>/assignments/
+# ===========================================================================
+
+@pytest.mark.django_db
+class TestTaskAssignmentListView:
+    def url(self, task):
+        return f"/api/tasks/{task.pk}/assignments/"
+
+    def test_unauthenticated_returns_401(self, api_client, task):
+        response = api_client.post(self.url(task), {"user_id": "00000000-0000-0000-0000-000000000000"})
+        assert response.status_code == 401
+
+    def test_po_can_add_co_assignee(self, auth_client, task, dev_user):
+        response = auth_client.post(self.url(task), {"user_id": str(dev_user.pk)})
+        assert response.status_code == 201
+        assert TaskAssignment.objects.filter(task=task, user=dev_user).exists()
+
+    def test_pm_can_add_co_assignee(self, api_client, task, pm_user, dev_user):
+        api_client.force_authenticate(user=pm_user)
+        response = api_client.post(self.url(task), {"user_id": str(dev_user.pk)})
+        assert response.status_code == 201
+
+    def test_viewer_cannot_add_co_assignee(self, api_client, task, viewer_user, dev_user):
+        api_client.force_authenticate(user=viewer_user)
+        response = api_client.post(self.url(task), {"user_id": str(dev_user.pk)})
+        assert response.status_code == 403
+
+    def test_unknown_user_returns_400(self, auth_client, task):
+        response = auth_client.post(self.url(task), {"user_id": "00000000-0000-0000-0000-000000000000"})
+        assert response.status_code == 400
+
+    def test_response_contains_assignment_fields(self, auth_client, task, dev_user):
+        response = auth_client.post(self.url(task), {"user_id": str(dev_user.pk)})
+        assert response.status_code == 201
+        assert "id" in response.data
+        assert response.data["user"]["id"] == str(dev_user.pk)
+
+    def test_idempotent_add_returns_existing(self, auth_client, task, dev_user):
+        r1 = auth_client.post(self.url(task), {"user_id": str(dev_user.pk)})
+        r2 = auth_client.post(self.url(task), {"user_id": str(dev_user.pk)})
+        assert r1.status_code == 201
+        assert r2.status_code == 201
+        assert TaskAssignment.objects.filter(task=task, user=dev_user).count() == 1
+
+
+# ===========================================================================
+# API: TaskAssignmentDetailView  DELETE /api/tasks/<pk>/assignments/<user_id>/
+# ===========================================================================
+
+@pytest.mark.django_db
+class TestTaskAssignmentDetailView:
+    def url(self, task, user_id):
+        return f"/api/tasks/{task.pk}/assignments/{user_id}/"
+
+    def test_unauthenticated_returns_401(self, api_client, task, dev_user):
+        response = api_client.delete(self.url(task, dev_user.pk))
+        assert response.status_code == 401
+
+    def test_po_can_remove_co_assignee(self, auth_client, task, user, dev_user):
+        TaskService.add_co_assignee(task, dev_user, assigned_by=user)
+        response = auth_client.delete(self.url(task, dev_user.pk))
+        assert response.status_code == 204
+        assert not TaskAssignment.objects.filter(task=task, user=dev_user).exists()
+
+    def test_viewer_cannot_remove_co_assignee(self, api_client, task, user, viewer_user, dev_user):
+        TaskService.add_co_assignee(task, dev_user, assigned_by=user)
+        api_client.force_authenticate(user=viewer_user)
+        response = api_client.delete(self.url(task, dev_user.pk))
+        assert response.status_code == 403
+
+    def test_nonexistent_user_returns_404(self, auth_client, task):
+        response = auth_client.delete(self.url(task, "00000000-0000-0000-0000-000000000000"))
+        assert response.status_code == 404
+
+    def test_remove_non_assigned_user_returns_204(self, auth_client, task, dev_user):
+        # Removing a user who was never assigned is a no-op, not an error
+        response = auth_client.delete(self.url(task, dev_user.pk))
+        assert response.status_code == 204
+
+
+# ===========================================================================
+# API: TaskLabelListView  POST /api/tasks/<pk>/labels/
+# ===========================================================================
+
+@pytest.mark.django_db
+class TestTaskLabelListView:
+    def url(self, task):
+        return f"/api/tasks/{task.pk}/labels/"
+
+    def test_unauthenticated_returns_401(self, api_client, task, label):
+        response = api_client.post(self.url(task), {"label_id": str(label.pk)})
+        assert response.status_code == 401
+
+    def test_po_can_attach_label(self, auth_client, task, label):
+        response = auth_client.post(self.url(task), {"label_id": str(label.pk)})
+        assert response.status_code == 201
+        assert TaskLabel.objects.filter(task=task, label=label).exists()
+
+    def test_pm_can_attach_label(self, api_client, task, label, pm_user):
+        api_client.force_authenticate(user=pm_user)
+        response = api_client.post(self.url(task), {"label_id": str(label.pk)})
+        assert response.status_code == 201
+
+    def test_viewer_cannot_attach_label(self, api_client, task, label, viewer_user):
+        api_client.force_authenticate(user=viewer_user)
+        response = api_client.post(self.url(task), {"label_id": str(label.pk)})
+        assert response.status_code == 403
+
+    def test_unknown_label_returns_400(self, auth_client, task):
+        response = auth_client.post(self.url(task), {"label_id": "00000000-0000-0000-0000-000000000000"})
+        assert response.status_code == 400
+
+    def test_idempotent_attach(self, auth_client, task, label):
+        auth_client.post(self.url(task), {"label_id": str(label.pk)})
+        auth_client.post(self.url(task), {"label_id": str(label.pk)})
+        assert TaskLabel.objects.filter(task=task, label=label).count() == 1
+
+
+# ===========================================================================
+# API: TaskLabelDetailView  DELETE /api/tasks/<pk>/labels/<label_id>/
+# ===========================================================================
+
+@pytest.mark.django_db
+class TestTaskLabelDetailView:
+    def url(self, task, label_id):
+        return f"/api/tasks/{task.pk}/labels/{label_id}/"
+
+    def test_unauthenticated_returns_401(self, api_client, task, label):
+        response = api_client.delete(self.url(task, label.pk))
+        assert response.status_code == 401
+
+    def test_po_can_detach_label(self, auth_client, task, label, user):
+        TaskService.add_label(task, label)
+        response = auth_client.delete(self.url(task, label.pk))
+        assert response.status_code == 204
+        assert not TaskLabel.objects.filter(task=task, label=label).exists()
+
+    def test_viewer_cannot_detach_label(self, api_client, task, label, user, viewer_user):
+        TaskService.add_label(task, label)
+        api_client.force_authenticate(user=viewer_user)
+        response = api_client.delete(self.url(task, label.pk))
+        assert response.status_code == 403
+
+    def test_nonexistent_label_returns_404(self, auth_client, task):
+        response = auth_client.delete(self.url(task, "00000000-0000-0000-0000-000000000000"))
+        assert response.status_code == 404
+
+    def test_detach_unattached_label_returns_204(self, auth_client, task, label):
+        # Removing a label that's not attached is a no-op
+        response = auth_client.delete(self.url(task, label.pk))
+        assert response.status_code == 204
+
+
+# ===========================================================================
+# API: TaskDependencyListView  GET/POST /api/tasks/<pk>/dependencies/
+# ===========================================================================
+
+@pytest.mark.django_db
+class TestTaskDependencyListView:
+    def url(self, task):
+        return f"/api/tasks/{task.pk}/dependencies/"
+
+    def test_unauthenticated_returns_401(self, api_client, task):
+        response = api_client.get(self.url(task))
+        assert response.status_code == 401
+
+    def test_member_can_list_dependencies(self, auth_client, project, task, user):
+        t2 = TaskService.create_task(project=project, creator=user, title="T2")
+        TaskService.add_dependency(task, t2, DependencyType.BLOCKS, created_by=user)
+        response = auth_client.get(self.url(task))
+        assert response.status_code == 200
+        assert len(response.data) == 1
+        assert response.data[0]["type"] == DependencyType.BLOCKS
+
+    def test_non_member_gets_404(self, api_client, task, other_user):
+        api_client.force_authenticate(user=other_user)
+        response = api_client.get(self.url(task))
+        assert response.status_code == 404
+
+    def test_response_contains_expected_fields(self, auth_client, project, task, user):
+        t2 = TaskService.create_task(project=project, creator=user, title="T2")
+        TaskService.add_dependency(task, t2, DependencyType.RELATES_TO, created_by=user)
+        response = auth_client.get(self.url(task))
+        dep = response.data[0]
+        assert "id" in dep
+        assert "depends_on_task" in dep
+        assert dep["depends_on_task"]["id"] == str(t2.pk)
+        assert "created_by" in dep
+        assert "created_at" in dep
+
+    def test_po_can_add_dependency(self, auth_client, project, task, user):
+        t2 = TaskService.create_task(project=project, creator=user, title="T2")
+        response = auth_client.post(
+            self.url(task), {"depends_on_task_id": str(t2.pk), "type": DependencyType.BLOCKS}
+        )
+        assert response.status_code == 201
+        assert TaskDependency.objects.filter(task=task, depends_on_task=t2).exists()
+
+    def test_viewer_cannot_add_dependency(self, api_client, project, task, user, viewer_user):
+        t2 = TaskService.create_task(project=project, creator=user, title="T2")
+        api_client.force_authenticate(user=viewer_user)
+        response = api_client.post(
+            self.url(task), {"depends_on_task_id": str(t2.pk), "type": DependencyType.BLOCKS}
+        )
+        assert response.status_code == 403
+
+    def test_self_dependency_returns_400(self, auth_client, task):
+        response = auth_client.post(
+            self.url(task), {"depends_on_task_id": str(task.pk), "type": DependencyType.BLOCKS}
+        )
+        assert response.status_code == 400
+
+    def test_unknown_task_returns_400(self, auth_client, task):
+        response = auth_client.post(
+            self.url(task),
+            {"depends_on_task_id": "00000000-0000-0000-0000-000000000000", "type": DependencyType.BLOCKS},
+        )
+        assert response.status_code == 400
+
+    def test_invalid_type_returns_400(self, auth_client, project, task, user):
+        t2 = TaskService.create_task(project=project, creator=user, title="T2")
+        response = auth_client.post(
+            self.url(task), {"depends_on_task_id": str(t2.pk), "type": "owns"}
+        )
+        assert response.status_code == 400
+
+    def test_missing_type_returns_400(self, auth_client, project, task, user):
+        t2 = TaskService.create_task(project=project, creator=user, title="T2")
+        response = auth_client.post(self.url(task), {"depends_on_task_id": str(t2.pk)})
+        assert response.status_code == 400
+
+
+# ===========================================================================
+# API: TaskDependencyDetailView  DELETE /api/tasks/<pk>/dependencies/<dep_id>/
+# ===========================================================================
+
+@pytest.mark.django_db
+class TestTaskDependencyDetailView:
+    def url(self, task, dep_id):
+        return f"/api/tasks/{task.pk}/dependencies/{dep_id}/"
+
+    def test_unauthenticated_returns_401(self, api_client, task):
+        response = api_client.delete(self.url(task, "00000000-0000-0000-0000-000000000000"))
+        assert response.status_code == 401
+
+    def test_po_can_remove_dependency(self, auth_client, project, task, user):
+        t2 = TaskService.create_task(project=project, creator=user, title="T2")
+        dep = TaskService.add_dependency(task, t2, DependencyType.BLOCKS, created_by=user)
+        response = auth_client.delete(self.url(task, dep.pk))
+        assert response.status_code == 204
+        assert not TaskDependency.objects.filter(pk=dep.pk).exists()
+
+    def test_viewer_cannot_remove_dependency(self, api_client, project, task, user, viewer_user):
+        t2 = TaskService.create_task(project=project, creator=user, title="T2")
+        dep = TaskService.add_dependency(task, t2, DependencyType.BLOCKS, created_by=user)
+        api_client.force_authenticate(user=viewer_user)
+        response = api_client.delete(self.url(task, dep.pk))
+        assert response.status_code == 403
+
+    def test_nonexistent_dependency_returns_404(self, auth_client, task):
+        response = auth_client.delete(self.url(task, "00000000-0000-0000-0000-000000000000"))
+        assert response.status_code == 404
+
+    def test_dependency_of_other_task_returns_404(self, auth_client, project, task, user):
+        t2 = TaskService.create_task(project=project, creator=user, title="T2")
+        t3 = TaskService.create_task(project=project, creator=user, title="T3")
+        dep = TaskService.add_dependency(t2, t3, DependencyType.BLOCKS, created_by=user)
+        response = auth_client.delete(self.url(task, dep.pk))
+        assert response.status_code == 404
+
+
+# ===========================================================================
+# API: TaskGuestAccessListView  GET/POST /api/tasks/<pk>/guest-access/
+# ===========================================================================
+
+@pytest.mark.django_db
+class TestTaskGuestAccessListView:
+    def url(self, task):
+        return f"/api/tasks/{task.pk}/guest-access/"
+
+    def test_unauthenticated_returns_401(self, api_client, task):
+        response = api_client.get(self.url(task))
+        assert response.status_code == 401
+
+    def test_po_can_list_guest_accesses(self, auth_client, task, guest_user, user):
+        TaskService.grant_guest_access(task, guest_user, granted_by=user)
+        response = auth_client.get(self.url(task))
+        assert response.status_code == 200
+        assert any(a["user"]["id"] == str(guest_user.pk) for a in response.data)
+
+    def test_pm_can_list_guest_accesses(self, api_client, task, pm_user, guest_user, user):
+        TaskService.grant_guest_access(task, guest_user, granted_by=user)
+        api_client.force_authenticate(user=pm_user)
+        response = api_client.get(self.url(task))
+        assert response.status_code == 200
+
+    def test_dev_cannot_list_guest_accesses(self, api_client, task, dev_user):
+        api_client.force_authenticate(user=dev_user)
+        response = api_client.get(self.url(task))
+        assert response.status_code == 403
+
+    def test_sa_can_list_guest_accesses(self, api_client, sa_user, task, guest_user, user):
+        TaskService.grant_guest_access(task, guest_user, granted_by=user)
+        api_client.force_authenticate(user=sa_user)
+        response = api_client.get(self.url(task))
+        assert response.status_code == 200
+
+    def test_response_contains_expected_fields(self, auth_client, task, guest_user, user):
+        TaskService.grant_guest_access(task, guest_user, granted_by=user)
+        response = auth_client.get(self.url(task))
+        access = response.data[0]
+        assert "id" in access
+        assert "user" in access
+        assert "granted_by" in access
+        assert "granted_at" in access
+        assert "expires_at" in access
+
+    def test_po_can_grant_access(self, auth_client, task, guest_user):
+        response = auth_client.post(self.url(task), {"user_id": str(guest_user.pk)})
+        assert response.status_code == 201
+        assert TaskGuestAccess.objects.filter(task=task, user=guest_user).exists()
+
+    def test_pm_can_grant_access(self, api_client, task, pm_user, guest_user):
+        api_client.force_authenticate(user=pm_user)
+        response = api_client.post(self.url(task), {"user_id": str(guest_user.pk)})
+        assert response.status_code == 201
+
+    def test_dev_cannot_grant_access(self, api_client, task, dev_user, guest_user):
+        api_client.force_authenticate(user=dev_user)
+        response = api_client.post(self.url(task), {"user_id": str(guest_user.pk)})
+        assert response.status_code == 403
+
+    def test_grant_with_expires_at(self, auth_client, task, guest_user):
+        expires = "2099-12-31T23:59:59Z"
+        response = auth_client.post(self.url(task), {"user_id": str(guest_user.pk), "expires_at": expires})
+        assert response.status_code == 201
+        assert response.data["expires_at"] is not None
+        access = TaskGuestAccess.objects.get(task=task, user=guest_user)
+        assert access.expires_at is not None
+
+    def test_unknown_user_returns_400(self, auth_client, task):
+        response = auth_client.post(self.url(task), {"user_id": "00000000-0000-0000-0000-000000000000"})
+        assert response.status_code == 400
+
+    def test_idempotent_grant(self, auth_client, task, guest_user):
+        auth_client.post(self.url(task), {"user_id": str(guest_user.pk)})
+        auth_client.post(self.url(task), {"user_id": str(guest_user.pk)})
+        assert TaskGuestAccess.objects.filter(task=task, user=guest_user).count() == 1
+
+
+# ===========================================================================
+# API: TaskGuestAccessDetailView  DELETE /api/tasks/<pk>/guest-access/<user_id>/
+# ===========================================================================
+
+@pytest.mark.django_db
+class TestTaskGuestAccessDetailView:
+    def url(self, task, user_id):
+        return f"/api/tasks/{task.pk}/guest-access/{user_id}/"
+
+    def test_unauthenticated_returns_401(self, api_client, task, guest_user):
+        response = api_client.delete(self.url(task, guest_user.pk))
+        assert response.status_code == 401
+
+    def test_po_can_revoke_access(self, auth_client, task, guest_user, user):
+        TaskService.grant_guest_access(task, guest_user, granted_by=user)
+        response = auth_client.delete(self.url(task, guest_user.pk))
+        assert response.status_code == 204
+        assert not TaskGuestAccess.objects.filter(task=task, user=guest_user).exists()
+
+    def test_pm_can_revoke_access(self, api_client, task, pm_user, guest_user, user):
+        TaskService.grant_guest_access(task, guest_user, granted_by=user)
+        api_client.force_authenticate(user=pm_user)
+        response = api_client.delete(self.url(task, guest_user.pk))
+        assert response.status_code == 204
+
+    def test_dev_cannot_revoke_access(self, api_client, task, dev_user, guest_user, user):
+        TaskService.grant_guest_access(task, guest_user, granted_by=user)
+        api_client.force_authenticate(user=dev_user)
+        response = api_client.delete(self.url(task, guest_user.pk))
+        assert response.status_code == 403
+
+    def test_sa_can_revoke_access(self, api_client, sa_user, task, guest_user, user):
+        TaskService.grant_guest_access(task, guest_user, granted_by=user)
+        api_client.force_authenticate(user=sa_user)
+        response = api_client.delete(self.url(task, guest_user.pk))
+        assert response.status_code == 204
+
+    def test_revoke_nonexistent_access_returns_204(self, auth_client, task, guest_user):
+        # Revoking access that was never granted is a no-op
+        response = auth_client.delete(self.url(task, guest_user.pk))
+        assert response.status_code == 204

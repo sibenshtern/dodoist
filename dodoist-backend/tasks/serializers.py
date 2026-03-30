@@ -1,9 +1,9 @@
 from rest_framework import serializers
 
-from projects.models import BoardColumn, Project, ProjectStatus, Sprint, TaskStatus
+from projects.models import BoardColumn, Label, Project, ProjectStatus, Sprint, TaskStatus
 from users.models import User
 
-from .models import Task, TaskPriority, TaskType
+from .models import DependencyType, Task, TaskAssignment, TaskDependency, TaskGuestAccess, TaskLabel, TaskPriority, TaskType
 from .services import TaskService
 
 
@@ -212,3 +212,174 @@ class TaskUpdateSerializer(serializers.Serializer):
             instance.save(update_fields=fields_to_save + ["updated_at"])
 
         return instance
+
+
+# ---------------------------------------------------------------------------
+# Subtasks / nested task brief
+# ---------------------------------------------------------------------------
+
+class TaskBriefSerializer(serializers.Serializer):
+    id = serializers.UUIDField()
+    title = serializers.CharField()
+    status = serializers.CharField()
+    type = serializers.CharField()
+
+
+# ---------------------------------------------------------------------------
+# Assignments (co-assignees)
+# ---------------------------------------------------------------------------
+
+class TaskAssignmentSerializer(serializers.Serializer):
+    id = serializers.UUIDField()
+    user = UserBriefSerializer()
+    assigned_by = UserBriefSerializer()
+    assigned_at = serializers.DateTimeField()
+
+
+class TaskAssignmentAddSerializer(serializers.Serializer):
+    user_id = serializers.UUIDField()
+
+    def validate_user_id(self, value):
+        try:
+            return User.objects.get(pk=value, is_active=True)
+        except User.DoesNotExist:
+            raise serializers.ValidationError("User not found.")
+
+
+# ---------------------------------------------------------------------------
+# Task labels
+# ---------------------------------------------------------------------------
+
+class TaskLabelSerializer(serializers.Serializer):
+    id = serializers.UUIDField(source="label.id")
+    name = serializers.CharField(source="label.name")
+    color = serializers.CharField(source="label.color")
+
+
+class TaskLabelAddSerializer(serializers.Serializer):
+    label_id = serializers.UUIDField()
+
+    def validate_label_id(self, value):
+        try:
+            return Label.objects.get(pk=value)
+        except Label.DoesNotExist:
+            raise serializers.ValidationError("Label not found.")
+
+
+# ---------------------------------------------------------------------------
+# Dependencies
+# ---------------------------------------------------------------------------
+
+class TaskDependencySerializer(serializers.Serializer):
+    id = serializers.UUIDField()
+    depends_on_task = TaskBriefSerializer()
+    type = serializers.CharField()
+    created_by = UserBriefSerializer()
+    created_at = serializers.DateTimeField()
+
+
+class TaskDependencyCreateSerializer(serializers.Serializer):
+    depends_on_task_id = serializers.UUIDField()
+    type = serializers.ChoiceField(choices=DependencyType.choices)
+
+    def validate_depends_on_task_id(self, value):
+        try:
+            return Task.objects.get(pk=value, deleted_at__isnull=True)
+        except Task.DoesNotExist:
+            raise serializers.ValidationError("Task not found.")
+
+
+# ---------------------------------------------------------------------------
+# Guest access
+# ---------------------------------------------------------------------------
+
+class TaskGuestAccessSerializer(serializers.Serializer):
+    id = serializers.UUIDField()
+    user = UserBriefSerializer()
+    granted_by = UserBriefSerializer()
+    granted_at = serializers.DateTimeField()
+    expires_at = serializers.DateTimeField(allow_null=True)
+
+
+class TaskGuestAccessCreateSerializer(serializers.Serializer):
+    user_id = serializers.UUIDField()
+    expires_at = serializers.DateTimeField(required=False, allow_null=True)
+
+    def validate_user_id(self, value):
+        try:
+            return User.objects.get(pk=value, is_active=True)
+        except User.DoesNotExist:
+            raise serializers.ValidationError("User not found.")
+
+
+# ---------------------------------------------------------------------------
+# Project-nested task creation (project comes from URL, not body)
+# ---------------------------------------------------------------------------
+
+class ProjectTaskCreateSerializer(serializers.Serializer):
+    title = serializers.CharField(max_length=500)
+    task_type = serializers.ChoiceField(choices=TaskType.choices, default=TaskType.TASK)
+    priority = serializers.ChoiceField(choices=TaskPriority.choices, default=TaskPriority.NONE)
+    status = serializers.ChoiceField(choices=TaskStatus.choices, required=False)
+    description = serializers.JSONField(required=False, allow_null=True)
+    assigned_to_id = serializers.UUIDField(required=False, allow_null=True)
+    sprint_id = serializers.UUIDField(required=False, allow_null=True)
+    board_column_id = serializers.UUIDField(required=False, allow_null=True)
+    parent_task_id = serializers.UUIDField(required=False, allow_null=True)
+    story_points = serializers.IntegerField(min_value=0, required=False, allow_null=True)
+    due_date = serializers.DateTimeField(required=False, allow_null=True)
+    start_date = serializers.DateTimeField(required=False, allow_null=True)
+    is_private = serializers.BooleanField(default=False)
+
+    def validate(self, data):
+        errors = {}
+        project = self.context.get("project")
+
+        assigned_to_id = data.pop("assigned_to_id", None)
+        if assigned_to_id is not None:
+            try:
+                data["assigned_to"] = User.objects.get(pk=assigned_to_id, is_active=True)
+            except User.DoesNotExist:
+                errors["assigned_to_id"] = "User not found."
+
+        sprint_id = data.pop("sprint_id", None)
+        if sprint_id is not None:
+            try:
+                data["sprint"] = Sprint.objects.get(pk=sprint_id, project=project)
+            except Sprint.DoesNotExist:
+                errors["sprint_id"] = "Sprint not found in this project."
+
+        board_column_id = data.pop("board_column_id", None)
+        if board_column_id is not None:
+            try:
+                data["board_column"] = BoardColumn.objects.get(pk=board_column_id)
+            except BoardColumn.DoesNotExist:
+                errors["board_column_id"] = "Board column not found."
+
+        parent_task_id = data.pop("parent_task_id", None)
+        if parent_task_id is not None:
+            try:
+                data["parent_task"] = Task.objects.get(pk=parent_task_id, deleted_at__isnull=True)
+            except Task.DoesNotExist:
+                errors["parent_task_id"] = "Parent task not found."
+
+        if errors:
+            raise serializers.ValidationError(errors)
+
+        return data
+
+    def create(self, validated_data):
+        creator = validated_data.pop("creator")
+        project = validated_data.pop("project")
+        task_type = validated_data.pop("task_type", TaskType.TASK)
+        priority = validated_data.pop("priority", TaskPriority.NONE)
+        title = validated_data.pop("title")
+
+        return TaskService.create_task(
+            project=project,
+            creator=creator,
+            title=title,
+            task_type=task_type,
+            priority=priority,
+            **validated_data,
+        )
