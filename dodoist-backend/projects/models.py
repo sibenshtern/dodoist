@@ -88,10 +88,6 @@ class WorkspaceMember(models.Model):
         return f"{self.user_id} in {self.workspace_id}"
 
 
-# ---------------------------------------------------------------------------
-# Project
-# ---------------------------------------------------------------------------
-
 class Project(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     workspace = models.ForeignKey(Workspace, on_delete=models.CASCADE, related_name="projects")
@@ -150,10 +146,6 @@ class Label(models.Model):
     def __str__(self):
         return self.name
 
-
-# ---------------------------------------------------------------------------
-# Planning
-# ---------------------------------------------------------------------------
 
 class Sprint(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

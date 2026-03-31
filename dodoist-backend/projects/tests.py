@@ -1,4 +1,5 @@
 import pytest
+from rest_framework.test import APIClient
 
 from projects.models import (
     Board,
@@ -13,6 +14,7 @@ from projects.models import (
     TaskStatus,
     Workspace,
     WorkspaceMember,
+    WorkspacePlan,
 )
 from projects.services import ProjectService, SprintService, WorkspaceService
 from users.models import GlobalRole, User
@@ -31,6 +33,25 @@ def other_user(db):
     return UserService.register(
         email="bob@example.com", password="pass123", display_name="Bob"
     )
+
+
+@pytest.fixture
+def sa_user(db):
+    return User.objects.create_user(
+        email="sa@example.com", password="pass123", display_name="SA",
+        global_role=GlobalRole.SA,
+    )
+
+
+@pytest.fixture
+def api_client():
+    return APIClient()
+
+
+@pytest.fixture
+def auth_client(api_client, user):
+    api_client.force_authenticate(user=user)
+    return api_client
 
 
 @pytest.fixture
@@ -253,3 +274,262 @@ class TestSprintService:
         sprint = SprintService.create_sprint(project=scrum_project, creator=user, name="S1")
         with pytest.raises(ValueError, match="Only active sprints"):
             SprintService.complete_sprint(sprint)
+
+
+# ---------------------------------------------------------------------------
+# WorkspaceService — description and plan params
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+class TestWorkspaceServiceCreate:
+    def test_create_workspace_with_description(self, user):
+        ws = WorkspaceService.create_workspace(owner=user, name="Acme", slug="acme-desc", description="Hello")
+        assert ws.description == "Hello"
+
+    def test_create_workspace_with_plan(self, user):
+        ws = WorkspaceService.create_workspace(owner=user, name="Pro", slug="pro-ws", plan=WorkspacePlan.PRO)
+        assert ws.plan == WorkspacePlan.PRO
+
+    def test_create_workspace_default_plan_is_free(self, user):
+        ws = WorkspaceService.create_workspace(owner=user, name="Free", slug="free-ws")
+        assert ws.plan == WorkspacePlan.FREE
+
+    def test_create_workspace_default_description_is_empty(self, user):
+        ws = WorkspaceService.create_workspace(owner=user, name="Empty", slug="empty-ws")
+        assert ws.description == ""
+
+
+# ---------------------------------------------------------------------------
+# API: WorkspaceListCreateView
+# ---------------------------------------------------------------------------
+
+WORKSPACES_URL = "/api/workspaces/"
+
+
+@pytest.mark.django_db
+class TestWorkspaceListCreateView:
+    def test_list_returns_own_workspaces(self, auth_client, workspace):
+        response = auth_client.get(WORKSPACES_URL)
+        assert response.status_code == 200
+        assert any(w["slug"] == "acme" for w in response.data)
+
+    def test_list_excludes_other_users_workspaces(self, auth_client, other_user):
+        other_ws = WorkspaceService.create_workspace(owner=other_user, name="Other", slug="other-ws")
+        response = auth_client.get(WORKSPACES_URL)
+        assert not any(w["slug"] == "other-ws" for w in response.data)
+
+    def test_filter_is_personal_true(self, auth_client, user, workspace):
+        WorkspaceService.create_personal_workspace(user)
+        response = auth_client.get(WORKSPACES_URL + "?is_personal=true")
+        assert response.status_code == 200
+        assert response.data
+        assert all(w["is_personal"] for w in response.data)
+
+    def test_filter_is_personal_false(self, auth_client, user, workspace):
+        WorkspaceService.create_personal_workspace(user)
+        response = auth_client.get(WORKSPACES_URL + "?is_personal=false")
+        assert response.status_code == 200
+        assert all(not w["is_personal"] for w in response.data)
+
+    def test_sa_sees_all_workspaces(self, api_client, sa_user, workspace):
+        api_client.force_authenticate(user=sa_user)
+        response = api_client.get(WORKSPACES_URL)
+        assert response.status_code == 200
+        assert any(w["slug"] == "acme" for w in response.data)
+
+    def test_unauthenticated_returns_401(self, api_client):
+        response = api_client.get(WORKSPACES_URL)
+        assert response.status_code == 401
+
+    def test_create_workspace(self, auth_client, user):
+        response = auth_client.post(WORKSPACES_URL, {"name": "New Co", "slug": "new-co"})
+        assert response.status_code == 201
+        assert response.data["slug"] == "new-co"
+        assert response.data["name"] == "New Co"
+        assert response.data["owner"]["id"] == str(user.pk)
+
+    def test_create_workspace_auto_slug(self, auth_client):
+        response = auth_client.post(WORKSPACES_URL, {"name": "Auto Slug Corp"})
+        assert response.status_code == 201
+        assert " " not in response.data["slug"]
+
+    def test_create_workspace_with_description_and_plan(self, auth_client):
+        response = auth_client.post(WORKSPACES_URL, {
+            "name": "Pro Co", "slug": "pro-co",
+            "description": "A pro workspace", "plan": WorkspacePlan.PRO,
+        })
+        assert response.status_code == 201
+        assert response.data["description"] == "A pro workspace"
+        assert response.data["plan"] == WorkspacePlan.PRO
+
+    def test_create_duplicate_slug_returns_400(self, auth_client, workspace):
+        response = auth_client.post(WORKSPACES_URL, {"name": "Another", "slug": "acme"})
+        assert response.status_code == 400
+
+    def test_create_missing_name_returns_400(self, auth_client):
+        response = auth_client.post(WORKSPACES_URL, {"slug": "no-name"})
+        assert response.status_code == 400
+
+    def test_unauthenticated_create_returns_401(self, api_client):
+        response = api_client.post(WORKSPACES_URL, {"name": "X"})
+        assert response.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# API: WorkspaceDetailView
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+class TestWorkspaceDetailView:
+    def url(self, slug="acme"):
+        return f"/api/workspaces/{slug}/"
+
+    def test_member_can_retrieve(self, auth_client, workspace):
+        response = auth_client.get(self.url())
+        assert response.status_code == 200
+        assert response.data["slug"] == "acme"
+
+    def test_non_member_gets_404(self, api_client, workspace, other_user):
+        api_client.force_authenticate(user=other_user)
+        response = api_client.get(self.url())
+        assert response.status_code == 404
+
+    def test_sa_can_retrieve_any_workspace(self, api_client, sa_user, workspace):
+        api_client.force_authenticate(user=sa_user)
+        response = api_client.get(self.url())
+        assert response.status_code == 200
+
+    def test_nonexistent_workspace_returns_404(self, auth_client):
+        response = auth_client.get(self.url("ghost"))
+        assert response.status_code == 404
+
+    def test_owner_can_patch_name(self, auth_client, workspace):
+        response = auth_client.patch(self.url(), {"name": "Acme Updated"})
+        assert response.status_code == 200
+        assert response.data["name"] == "Acme Updated"
+
+    def test_owner_can_patch_description(self, auth_client, workspace):
+        response = auth_client.patch(self.url(), {"description": "New description"})
+        assert response.status_code == 200
+        assert response.data["description"] == "New description"
+
+    def test_owner_can_patch_plan(self, auth_client, workspace):
+        response = auth_client.patch(self.url(), {"plan": WorkspacePlan.PRO})
+        assert response.status_code == 200
+        assert response.data["plan"] == WorkspacePlan.PRO
+
+    def test_non_owner_member_cannot_patch(self, api_client, workspace, other_user):
+        WorkspaceService.add_member(workspace, other_user)
+        api_client.force_authenticate(user=other_user)
+        response = api_client.patch(self.url(), {"name": "Hacked"})
+        assert response.status_code == 403
+
+    def test_sa_can_patch_any_workspace(self, api_client, sa_user, workspace):
+        api_client.force_authenticate(user=sa_user)
+        response = api_client.patch(self.url(), {"name": "SA Updated"})
+        assert response.status_code == 200
+        assert response.data["name"] == "SA Updated"
+
+    def test_owner_cannot_delete(self, auth_client, workspace):
+        response = auth_client.delete(self.url())
+        assert response.status_code == 403
+
+    def test_sa_can_delete(self, api_client, sa_user, workspace):
+        api_client.force_authenticate(user=sa_user)
+        response = api_client.delete(self.url())
+        assert response.status_code == 204
+        assert not Workspace.objects.filter(slug="acme").exists()
+
+    def test_sa_delete_nonexistent_returns_404(self, api_client, sa_user):
+        api_client.force_authenticate(user=sa_user)
+        response = api_client.delete(self.url("ghost"))
+        assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# API: WorkspaceMemberListView
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+class TestWorkspaceMemberListView:
+    def url(self, slug="acme"):
+        return f"/api/workspaces/{slug}/members/"
+
+    def test_member_can_list_members(self, auth_client, workspace, user):
+        response = auth_client.get(self.url())
+        assert response.status_code == 200
+        member_ids = [m["user"]["id"] for m in response.data]
+        assert str(user.pk) in member_ids
+
+    def test_non_member_gets_404(self, api_client, workspace, other_user):
+        api_client.force_authenticate(user=other_user)
+        response = api_client.get(self.url())
+        assert response.status_code == 404
+
+    def test_owner_can_add_member(self, auth_client, workspace, other_user):
+        response = auth_client.post(self.url(), {"user_id": str(other_user.pk)})
+        assert response.status_code == 201
+        assert WorkspaceMember.objects.filter(workspace=workspace, user=other_user).exists()
+
+    def test_add_member_response_contains_user_info(self, auth_client, workspace, other_user):
+        response = auth_client.post(self.url(), {"user_id": str(other_user.pk)})
+        assert response.status_code == 201
+        assert response.data["user"]["email"] == other_user.email
+
+    def test_add_member_missing_user_id_returns_400(self, auth_client, workspace):
+        response = auth_client.post(self.url(), {})
+        assert response.status_code == 400
+
+    def test_add_member_unknown_user_id_returns_404(self, auth_client, workspace):
+        response = auth_client.post(self.url(), {"user_id": "00000000-0000-0000-0000-000000000000"})
+        assert response.status_code == 404
+
+    def test_non_owner_member_cannot_add_member(self, api_client, workspace, other_user, db):
+        third = User.objects.create_user(email="charlie@example.com", password="p", display_name="Charlie")
+        WorkspaceService.add_member(workspace, other_user)
+        api_client.force_authenticate(user=other_user)
+        response = api_client.post(self.url(), {"user_id": str(third.pk)})
+        assert response.status_code == 403
+
+    def test_add_existing_member_is_idempotent(self, auth_client, workspace, user):
+        response = auth_client.post(self.url(), {"user_id": str(user.pk)})
+        assert response.status_code == 201
+        assert WorkspaceMember.objects.filter(workspace=workspace, user=user).count() == 1
+
+
+# ---------------------------------------------------------------------------
+# API: WorkspaceMemberDetailView
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+class TestWorkspaceMemberDetailView:
+    def url(self, user_id, slug="acme"):
+        return f"/api/workspaces/{slug}/members/{user_id}/"
+
+    def test_owner_can_remove_member(self, auth_client, workspace, other_user):
+        WorkspaceService.add_member(workspace, other_user)
+        response = auth_client.delete(self.url(other_user.pk))
+        assert response.status_code == 204
+        assert not WorkspaceMember.objects.filter(workspace=workspace, user=other_user).exists()
+
+    def test_non_owner_cannot_remove_member(self, api_client, workspace, other_user, db):
+        third = User.objects.create_user(email="charlie@example.com", password="p", display_name="Charlie")
+        WorkspaceService.add_member(workspace, other_user)
+        WorkspaceService.add_member(workspace, third)
+        api_client.force_authenticate(user=other_user)
+        response = api_client.delete(self.url(third.pk))
+        assert response.status_code == 403
+
+    def test_sa_can_remove_any_member(self, api_client, sa_user, workspace, other_user):
+        WorkspaceService.add_member(workspace, other_user)
+        api_client.force_authenticate(user=sa_user)
+        response = api_client.delete(self.url(other_user.pk))
+        assert response.status_code == 204
+
+    def test_cannot_remove_workspace_owner(self, auth_client, workspace, user):
+        response = auth_client.delete(self.url(user.pk))
+        assert response.status_code == 400
+
+    def test_remove_nonexistent_user_returns_404(self, auth_client, workspace):
+        response = auth_client.delete(self.url("00000000-0000-0000-0000-000000000000"))
+        assert response.status_code == 404
