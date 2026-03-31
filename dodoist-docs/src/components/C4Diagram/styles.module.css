@@ -1,0 +1,85 @@
+.wrapper {
+  position: relative;
+  width: 100%;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--ifm-color-emphasis-300);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  background: var(--ifm-color-emphasis-100);
+  border-bottom: 1px solid var(--ifm-color-emphasis-300);
+}
+
+.title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--ifm-color-emphasis-700);
+  margin: 0;
+}
+
+.badge {
+  font-size: 0.7rem;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 12px;
+  background: var(--ifm-color-primary-lightest);
+  color: var(--ifm-color-primary-darkest);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.diagramContainer {
+  width: 100%;
+  position: relative;
+}
+
+.skeleton {
+  width: 100%;
+  background: var(--ifm-color-emphasis-100);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 8px;
+  color: var(--ifm-color-emphasis-500);
+  font-size: 0.85rem;
+}
+
+.spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid var(--ifm-color-emphasis-300);
+  border-top-color: var(--ifm-color-primary);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.error {
+  width: 100%;
+  padding: 24px;
+  background: var(--ifm-color-danger-contrast-background);
+  color: var(--ifm-color-danger-dark);
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+
+.errorTitle {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.errorMessage {
+  font-family: var(--ifm-font-family-monospace);
+  opacity: 0.8;
+}
