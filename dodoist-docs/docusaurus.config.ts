@@ -28,6 +28,8 @@ const config: Config = {
     locales: ['en'],
   },
 
+  plugins: ['docusaurus-plugin-image-zoom'],
+
   presets: [
     [
       'classic',
@@ -99,6 +101,13 @@ const config: Config = {
       theme: prismThemes.github,
       darkTheme: prismThemes.dracula,
       additionalLanguages: ['bash', 'json', 'sql', 'http'],
+    },
+    zoom: {
+      selector: '.markdown img',
+      background: {
+        light: 'rgb(255, 255, 255)',
+        dark: 'rgb(50, 50, 50)',
+      },
     },
   } satisfies Preset.ThemeConfig,
 };
