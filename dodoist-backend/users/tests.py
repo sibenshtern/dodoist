@@ -1,3 +1,6 @@
+import hashlib
+import secrets
+
 import pytest
 from django.utils import timezone
 
@@ -85,15 +88,20 @@ class TestUserSession:
             user=user,
             token_hash="abc123",
             expires_at=timezone.now() + timezone.timedelta(hours=1),
+            refresh_token_hash="ref123",
+            refresh_expires_at=timezone.now() + timezone.timedelta(days=7),
         )
         assert session.user_id == user.pk
         assert session.is_expired() is False
+        assert session.is_refresh_expired() is False
 
     def test_expired_session(self, user):
         session = UserSession.objects.create(
             user=user,
             token_hash="old",
             expires_at=timezone.now() - timezone.timedelta(seconds=1),
+            refresh_token_hash="ref_old",
+            refresh_expires_at=timezone.now() + timezone.timedelta(days=7),
         )
         assert session.is_expired() is True
 
@@ -137,6 +145,14 @@ class TestUserService:
         )
         assert hasattr(user, "preferences")
 
+    def test_register_creates_personal_workspace(self):
+        from projects.models import Workspace
+        user = UserService.register(
+            email="ws@example.com", password="testpass123", display_name="WS User"
+        )
+        ws = Workspace.objects.get(owner=user, is_personal=True)
+        assert ws.is_personal is True
+
     def test_register_duplicate_email_raises(self, user):
         with pytest.raises(ValueError, match="already exists"):
             UserService.register(
@@ -153,6 +169,8 @@ class TestUserService:
             user=user,
             token_hash="tok",
             expires_at=timezone.now() + timezone.timedelta(hours=1),
+            refresh_token_hash="reftok",
+            refresh_expires_at=timezone.now() + timezone.timedelta(days=7),
         )
         UserService.deactivate(user)
         assert user.sessions.count() == 0
@@ -176,6 +194,8 @@ class TestUserService:
             user=user,
             token_hash="mytoken",
             expires_at=timezone.now() + timezone.timedelta(hours=1),
+            refresh_token_hash="myrefresh",
+            refresh_expires_at=timezone.now() + timezone.timedelta(days=7),
         )
         assert UserSession.objects.filter(token_hash="mytoken").exists()
         UserService.invalidate_session("mytoken")
@@ -183,13 +203,62 @@ class TestUserService:
 
     def test_cleanup_expired_sessions(self, user):
         UserSession.objects.create(
-            user=user, token_hash="expired",
+            user=user, token_hash="expired", refresh_token_hash="r_expired",
             expires_at=timezone.now() - timezone.timedelta(hours=1),
+            refresh_expires_at=timezone.now() + timezone.timedelta(days=7),
         )
         UserSession.objects.create(
-            user=user, token_hash="valid",
+            user=user, token_hash="valid", refresh_token_hash="r_valid",
             expires_at=timezone.now() + timezone.timedelta(hours=1),
+            refresh_expires_at=timezone.now() + timezone.timedelta(days=7),
         )
         deleted = UserService.cleanup_expired_sessions()
         assert deleted == 1
         assert UserSession.objects.filter(token_hash="valid").exists()
+<<<<<<< Updated upstream
+=======
+
+
+# ---------------------------------------------------------------------------
+# View: MeView
+# ---------------------------------------------------------------------------
+
+from datetime import timedelta
+
+from rest_framework.test import APIClient
+
+
+@pytest.mark.django_db
+class TestMeView:
+    def _auth_client(self, user):
+        raw = secrets.token_hex(32)
+        token_hash = hashlib.sha256(raw.encode()).hexdigest()
+        raw_refresh = secrets.token_hex(32)
+        refresh_hash = hashlib.sha256(raw_refresh.encode()).hexdigest()
+        UserService.create_session(
+            user=user,
+            token_hash=token_hash,
+            expires_at=timezone.now() + timedelta(minutes=15),
+            refresh_token_hash=refresh_hash,
+            refresh_expires_at=timezone.now() + timedelta(days=7),
+        )
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {raw}")
+        return client
+
+    def test_me_returns_current_user(self, user):
+        client = self._auth_client(user)
+        response = client.get("/api/users/me")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["email"] == "alice@example.com"
+        assert data["display_name"] == "Alice"
+        assert "id" in data
+        assert "avatar_url" in data
+        assert "timezone" in data
+
+    def test_me_requires_auth(self):
+        client = APIClient()
+        response = client.get("/api/users/me")
+        assert response.status_code == 401
+>>>>>>> Stashed changes

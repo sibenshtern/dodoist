@@ -21,6 +21,10 @@ class UserService:
             user=user,
             notification_channels={"email": True, "push": False, "in_app": True},
         )
+
+        from projects.services import WorkspaceService  # deferred to avoid circular import
+        WorkspaceService.create_personal_workspace(user)
+
         return user
 
     @staticmethod
@@ -48,6 +52,8 @@ class UserService:
         user: User,
         token_hash: str,
         expires_at,
+        refresh_token_hash: str,
+        refresh_expires_at,
         device_info: str = "",
         ip_address: str | None = None,
     ) -> UserSession:
@@ -55,13 +61,25 @@ class UserService:
             user=user,
             token_hash=token_hash,
             expires_at=expires_at,
+            refresh_token_hash=refresh_token_hash,
+            refresh_expires_at=refresh_expires_at,
             device_info=device_info,
             ip_address=ip_address,
         )
 
     @staticmethod
+    def rotate_access_token(session: UserSession, new_token_hash: str, new_expires_at) -> None:
+        session.token_hash = new_token_hash
+        session.expires_at = new_expires_at
+        session.save(update_fields=["token_hash", "expires_at"])
+
+    @staticmethod
     def invalidate_session(token_hash: str) -> None:
         UserSession.objects.filter(token_hash=token_hash).delete()
+
+    @staticmethod
+    def invalidate_session_by_refresh(refresh_token_hash: str) -> None:
+        UserSession.objects.filter(refresh_token_hash=refresh_token_hash).delete()
 
     @staticmethod
     def cleanup_expired_sessions() -> int:

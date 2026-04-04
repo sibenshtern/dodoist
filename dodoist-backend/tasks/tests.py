@@ -1091,3 +1091,46 @@ class TestTaskGuestAccessDetailView:
         # Revoking access that was never granted is a no-op
         response = auth_client.delete(self.url(task, guest_user.pk))
         assert response.status_code == 204
+
+
+# ---------------------------------------------------------------------------
+# API: DashboardStatsView  GET /api/dashboard/stats/
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+class TestDashboardStatsView:
+    def test_returns_stats_shape(self, user, project, auth_client):
+        response = auth_client.get("/api/dashboard/stats/")
+        assert response.status_code == 200
+        data = response.json()
+        for key in ("open_tasks", "open_tasks_delta", "done_this_week",
+                    "done_this_week_delta_pct", "story_points",
+                    "story_points_total", "overdue"):
+            assert key in data, f"missing key: {key}"
+
+    def test_open_tasks_counts_assigned(self, user, project, auth_client):
+        TaskService.create_task(project=project, creator=user, title="T1", assigned_to=user)
+        TaskService.create_task(project=project, creator=user, title="T2", assigned_to=user)
+        response = auth_client.get("/api/dashboard/stats/")
+        assert response.json()["open_tasks"] == 2
+
+    def test_overdue_counts_past_due(self, user, project, auth_client):
+        from datetime import timedelta
+        t = TaskService.create_task(project=project, creator=user, title="Late", assigned_to=user)
+        t.due_date = timezone.now() - timedelta(days=2)
+        t.save()
+        data = auth_client.get("/api/dashboard/stats/").json()
+        assert data["overdue"] >= 1
+
+    def test_done_this_week(self, user, project, auth_client):
+        from datetime import timedelta
+        t = TaskService.create_task(project=project, creator=user, title="Done", assigned_to=user)
+        t.status = TaskStatus.DONE
+        t.completed_at = timezone.now()
+        t.save()
+        data = auth_client.get("/api/dashboard/stats/").json()
+        assert data["done_this_week"] >= 1
+
+    def test_unauthenticated_returns_401(self, api_client):
+        response = api_client.get("/api/dashboard/stats/")
+        assert response.status_code == 401

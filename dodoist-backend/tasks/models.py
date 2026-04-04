@@ -233,3 +233,35 @@ class ActivityLog(models.Model):
 
     def __str__(self):
         return f"{self.action} on {self.entity_type}:{self.entity_id}"
+
+
+class Reaction(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    comment = models.ForeignKey(Comment, on_delete=models.CASCADE, related_name="reactions")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="reactions")
+    emoji = models.CharField(max_length=10)
+    created_at = models.DateTimeField(default=tz.now)
+
+    class Meta:
+        db_table = "reactions"
+        unique_together = [("comment", "user", "emoji")]
+
+    def __str__(self):
+        return f"{self.emoji} by {self.user_id} on comment {self.comment_id}"
+
+
+class TimeLog(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name="time_logs")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="time_logs")
+    logged_minutes = models.PositiveIntegerField()
+    description = models.TextField(blank=True, default="")
+    logged_date = models.DateField()
+    created_at = models.DateTimeField(default=tz.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "time_logs"
+
+    def __str__(self):
+        return f"{self.logged_minutes}min by {self.user_id} on {self.logged_date}"

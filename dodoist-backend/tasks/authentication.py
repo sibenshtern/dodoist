@@ -9,13 +9,14 @@ from users.models import UserSession
 
 class SessionTokenAuthentication(BaseAuthentication):
     """
-    Authenticates requests using a bearer token stored in UserSession.
+    Authenticates requests using a short-lived access token (15-minute TTL).
 
     The client must send:
-        Authorization: Bearer <raw_token>
+        Authorization: Bearer <raw_access_token>
 
-    The raw token is hashed with SHA-256 before lookup. Sessions must be
-    created via UserService.create_session() with a SHA-256 hash of the token.
+    The raw token is hashed with SHA-256 before lookup against UserSession.token_hash.
+    When the access token expires, the client must call POST /api/auth/refresh using
+    the HttpOnly refresh token cookie to obtain a new access token.
     """
 
     def authenticate(self, request):
