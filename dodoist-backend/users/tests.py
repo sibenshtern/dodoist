@@ -193,3 +193,43 @@ class TestUserService:
         deleted = UserService.cleanup_expired_sessions()
         assert deleted == 1
         assert UserSession.objects.filter(token_hash="valid").exists()
+
+
+# ---------------------------------------------------------------------------
+# View: MeView
+# ---------------------------------------------------------------------------
+
+from rest_framework.test import APIClient
+import hashlib, secrets
+from datetime import timedelta
+
+
+@pytest.mark.django_db
+class TestMeView:
+    def _auth_client(self, user):
+        raw = secrets.token_hex(32)
+        token_hash = hashlib.sha256(raw.encode()).hexdigest()
+        UserService.create_session(
+            user=user,
+            token_hash=token_hash,
+            expires_at=timezone.now() + timedelta(days=1),
+        )
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {raw}")
+        return client
+
+    def test_me_returns_current_user(self, user):
+        client = self._auth_client(user)
+        response = client.get("/api/users/me")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["email"] == "alice@example.com"
+        assert data["display_name"] == "Alice"
+        assert "id" in data
+        assert "avatar_url" in data
+        assert "timezone" in data
+
+    def test_me_requires_auth(self):
+        client = APIClient()
+        response = client.get("/api/users/me")
+        assert response.status_code == 401
