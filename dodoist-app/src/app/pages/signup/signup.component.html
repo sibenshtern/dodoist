@@ -100,14 +100,19 @@
         </select>
       </div>
 
+      @if (serverError()) {
+        <p class="form__server-error">{{ serverError() }}</p>
+      }
+
       <button
         tuiButton
         type="submit"
         appearance="primary"
         size="l"
         class="submit-btn"
+        [disabled]="isLoading()"
       >
-        Create account
+        {{ isLoading() ? 'Creating account…' : 'Create account' }}
       </button>
 
     </form>
