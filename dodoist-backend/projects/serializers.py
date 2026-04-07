@@ -227,3 +227,101 @@ class LabelUpdateSerializer(serializers.Serializer):
             setattr(instance, field, value)
         instance.save(update_fields=list(validated_data.keys()))
         return instance
+
+
+# ---------------------------------------------------------------------------
+# Sprint serializers
+# ---------------------------------------------------------------------------
+
+class SprintSerializer(serializers.Serializer):
+    id = serializers.UUIDField()
+    project_id = serializers.UUIDField()
+    name = serializers.CharField()
+    goal = serializers.CharField()
+    status = serializers.CharField()
+    start_date = serializers.DateField(allow_null=True)
+    end_date = serializers.DateField(allow_null=True)
+    created_by = UserBriefSerializer()
+    created_at = serializers.DateTimeField()
+    updated_at = serializers.DateTimeField()
+    completed_at = serializers.DateTimeField(allow_null=True)
+
+
+class SprintCreateSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=200)
+    goal = serializers.CharField(max_length=1000, required=False, allow_blank=True, default="")
+    start_date = serializers.DateField(required=False, allow_null=True)
+    end_date = serializers.DateField(required=False, allow_null=True)
+
+
+class SprintUpdateSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=200, required=False)
+    goal = serializers.CharField(max_length=1000, required=False, allow_blank=True)
+    start_date = serializers.DateField(required=False, allow_null=True)
+    end_date = serializers.DateField(required=False, allow_null=True)
+
+
+class SprintCompleteSerializer(serializers.Serializer):
+    incomplete_tasks_action = serializers.ChoiceField(choices=["backlog", "next_sprint"])
+    next_sprint_id = serializers.UUIDField(required=False, allow_null=True)
+
+    def validate(self, data):
+        if data["incomplete_tasks_action"] == "next_sprint" and not data.get("next_sprint_id"):
+            raise serializers.ValidationError("next_sprint_id is required when action is 'next_sprint'.")
+        return data
+
+
+# ---------------------------------------------------------------------------
+# Board / BoardColumn serializers
+# ---------------------------------------------------------------------------
+
+class BoardColumnSerializer(serializers.Serializer):
+    id = serializers.UUIDField()
+    board_id = serializers.UUIDField()
+    name = serializers.CharField()
+    status_mapping = serializers.CharField()
+    position = serializers.IntegerField()
+    wip_limit = serializers.IntegerField(allow_null=True)
+    created_at = serializers.DateTimeField()
+    updated_at = serializers.DateTimeField()
+
+
+class BoardSerializer(serializers.Serializer):
+    id = serializers.UUIDField()
+    project_id = serializers.UUIDField()
+    name = serializers.CharField()
+    type = serializers.CharField()
+    is_default = serializers.BooleanField()
+    created_by = UserBriefSerializer()
+    created_at = serializers.DateTimeField()
+    updated_at = serializers.DateTimeField()
+
+
+class BoardCreateSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=255)
+    type = serializers.ChoiceField(choices=["kanban", "scrum"])
+    is_default = serializers.BooleanField(default=False)
+
+
+class BoardUpdateSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=255, required=False)
+    is_default = serializers.BooleanField(required=False)
+
+
+class BoardColumnCreateSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=100)
+    status_mapping = serializers.ChoiceField(
+        choices=["backlog", "todo", "in_progress", "in_review", "done", "cancelled"]
+    )
+    position = serializers.IntegerField(min_value=0)
+    wip_limit = serializers.IntegerField(min_value=1, required=False, allow_null=True)
+
+
+class BoardColumnUpdateSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=100, required=False)
+    status_mapping = serializers.ChoiceField(
+        choices=["backlog", "todo", "in_progress", "in_review", "done", "cancelled"],
+        required=False,
+    )
+    position = serializers.IntegerField(min_value=0, required=False)
+    wip_limit = serializers.IntegerField(min_value=1, required=False, allow_null=True)

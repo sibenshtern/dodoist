@@ -5,18 +5,29 @@ from rest_framework.views import APIView
 
 from users.models import GlobalRole, User
 
+from django.utils import timezone as tz
+
 from .models import (
+    Board,
+    BoardColumn,
     Label,
     Project,
     ProjectMember,
     ProjectRole,
     ProjectStatus,
+    ProjectType,
     Sprint,
     SprintStatus,
     Workspace,
     WorkspaceMember,
 )
 from .serializers import (
+    BoardColumnCreateSerializer,
+    BoardColumnSerializer,
+    BoardColumnUpdateSerializer,
+    BoardCreateSerializer,
+    BoardSerializer,
+    BoardUpdateSerializer,
     LabelCreateSerializer,
     LabelSerializer,
     LabelUpdateSerializer,
@@ -26,12 +37,16 @@ from .serializers import (
     ProjectMemberUpdateSerializer,
     ProjectSerializer,
     ProjectUpdateSerializer,
+    SprintCompleteSerializer,
+    SprintCreateSerializer,
+    SprintSerializer,
+    SprintUpdateSerializer,
     WorkspaceCreateSerializer,
     WorkspaceMemberSerializer,
     WorkspaceSerializer,
     WorkspaceUpdateSerializer,
 )
-from .services import ProjectService, WorkspaceService
+from .services import ProjectService, SprintService, WorkspaceService
 
 
 # ---------------------------------------------------------------------------
@@ -490,4 +505,303 @@ class LabelDetailView(APIView):
         if not request.user.has_elevated_access() and not _is_workspace_member(workspace, request.user):
             return Response({"detail": "Not found."}, status=404)
         label.delete()
+        return Response(status=204)
+
+
+# ---------------------------------------------------------------------------
+# Sprint views
+# ---------------------------------------------------------------------------
+
+def _can_manage_sprint(user: User, project: Project) -> bool:
+    """PM, PO, SA can manage sprints."""
+    if user.has_elevated_access():
+        return True
+    m = _get_project_membership(project, user)
+    return m is not None and m.role in (ProjectRole.PO, ProjectRole.PM)
+
+
+class ProjectSprintListView(APIView):
+    """
+    GET  /api/projects/<pk>/sprints/  — list sprints
+    POST /api/projects/<pk>/sprints/  — create sprint (PM/PO/SA)
+    """
+
+    def get(self, request, pk):
+        project = get_object_or_404(Project, pk=pk)
+        if not _can_view_project(request.user, project):
+            return Response({"detail": "Not found."}, status=404)
+        qs = Sprint.objects.filter(project=project).select_related("created_by").order_by("-created_at")
+        status_filter = request.query_params.get("status")
+        if status_filter:
+            qs = qs.filter(status=status_filter)
+        return Response(SprintSerializer(qs, many=True).data)
+
+    def post(self, request, pk):
+        project = get_object_or_404(Project, pk=pk)
+        if not _can_manage_sprint(request.user, project):
+            return Response({"detail": "Insufficient permissions."}, status=403)
+        if project.type != ProjectType.SCRUM:
+            return Response({"detail": "Sprints are only available for Scrum projects."}, status=400)
+        serializer = SprintCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        sprint = Sprint.objects.create(
+            project=project,
+            created_by=request.user,
+            name=data["name"],
+            goal=data.get("goal", ""),
+            start_date=data.get("start_date"),
+            end_date=data.get("end_date"),
+        )
+        sprint = Sprint.objects.select_related("created_by").get(pk=sprint.pk)
+        return Response(SprintSerializer(sprint).data, status=201)
+
+
+class SprintDetailView(APIView):
+    """
+    GET    /api/sprints/<pk>/  — get sprint with task stats
+    PATCH  /api/sprints/<pk>/  — update sprint (PM/PO/SA)
+    DELETE /api/sprints/<pk>/  — delete planned sprint (PM/PO/SA)
+    """
+
+    def _get_sprint(self, pk):
+        return get_object_or_404(Sprint.objects.select_related("project", "created_by"), pk=pk)
+
+    def get(self, request, pk):
+        sprint = self._get_sprint(pk)
+        if not _can_view_project(request.user, sprint.project):
+            return Response({"detail": "Not found."}, status=404)
+        from tasks.models import Task
+        from projects.models import TaskStatus
+        sprint_tasks = Task.objects.filter(sprint=sprint, deleted_at__isnull=True)
+        task_stats = {
+            "total": sprint_tasks.count(),
+            "completed": sprint_tasks.filter(status=TaskStatus.DONE).count(),
+            "in_progress": sprint_tasks.filter(status=TaskStatus.IN_PROGRESS).count(),
+            "total_story_points": sum(t.story_points or 0 for t in sprint_tasks),
+            "completed_story_points": sum(
+                t.story_points or 0 for t in sprint_tasks.filter(status=TaskStatus.DONE)
+            ),
+        }
+        data = SprintSerializer(sprint).data
+        data["task_stats"] = task_stats
+        return Response(data)
+
+    def patch(self, request, pk):
+        sprint = self._get_sprint(pk)
+        if not _can_manage_sprint(request.user, sprint.project):
+            return Response({"detail": "Insufficient permissions."}, status=403)
+        serializer = SprintUpdateSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        for field, value in serializer.validated_data.items():
+            setattr(sprint, field, value)
+        sprint.save()
+        return Response(SprintSerializer(sprint).data)
+
+    def delete(self, request, pk):
+        sprint = self._get_sprint(pk)
+        if not _can_manage_sprint(request.user, sprint.project):
+            return Response({"detail": "Insufficient permissions."}, status=403)
+        if sprint.status != SprintStatus.PLANNED:
+            return Response({"detail": "Only planned sprints can be deleted."}, status=400)
+        sprint.delete()
+        return Response(status=204)
+
+
+class SprintStartView(APIView):
+    """POST /api/sprints/<pk>/start/"""
+
+    def post(self, request, pk):
+        sprint = get_object_or_404(Sprint.objects.select_related("project", "created_by"), pk=pk)
+        if not _can_manage_sprint(request.user, sprint.project):
+            return Response({"detail": "Insufficient permissions."}, status=403)
+        try:
+            sprint = SprintService.start_sprint(sprint)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=409)
+        return Response(SprintSerializer(sprint).data)
+
+
+class SprintCompleteView(APIView):
+    """POST /api/sprints/<pk>/complete/"""
+
+    def post(self, request, pk):
+        sprint = get_object_or_404(Sprint.objects.select_related("project", "created_by"), pk=pk)
+        if not _can_manage_sprint(request.user, sprint.project):
+            return Response({"detail": "Insufficient permissions."}, status=403)
+        serializer = SprintCompleteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        try:
+            sprint = SprintService.complete_sprint(sprint)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=400)
+
+        # Handle incomplete tasks
+        from tasks.models import Task
+        from projects.models import TaskStatus
+        incomplete_tasks = Task.objects.filter(sprint=sprint, deleted_at__isnull=True).exclude(
+            status__in=[TaskStatus.DONE, TaskStatus.CANCELLED]
+        )
+        if data["incomplete_tasks_action"] == "backlog":
+            incomplete_tasks.update(sprint=None)
+        elif data["incomplete_tasks_action"] == "next_sprint":
+            next_sprint = get_object_or_404(Sprint, pk=data["next_sprint_id"])
+            incomplete_tasks.update(sprint=next_sprint)
+
+        return Response(SprintSerializer(sprint).data)
+
+
+class SprintTaskView(APIView):
+    """
+    POST   /api/sprints/<pk>/tasks/           — add task to sprint
+    DELETE /api/sprints/<pk>/tasks/<task_id>/ — remove task from sprint
+    """
+
+    def post(self, request, pk):
+        sprint = get_object_or_404(Sprint.objects.select_related("project"), pk=pk)
+        if not _can_manage_sprint(request.user, sprint.project):
+            return Response({"detail": "Insufficient permissions."}, status=403)
+        task_id = request.data.get("task_id")
+        if not task_id:
+            return Response({"detail": "task_id is required."}, status=400)
+        from tasks.models import Task
+        task = get_object_or_404(Task, pk=task_id, project=sprint.project, deleted_at__isnull=True)
+        task.sprint = sprint
+        task.save(update_fields=["sprint", "updated_at"])
+        return Response({"task_id": str(task.pk), "sprint_id": str(sprint.pk)}, status=201)
+
+    def delete(self, request, pk, task_id):
+        sprint = get_object_or_404(Sprint.objects.select_related("project"), pk=pk)
+        if not _can_manage_sprint(request.user, sprint.project):
+            return Response({"detail": "Insufficient permissions."}, status=403)
+        from tasks.models import Task
+        task = get_object_or_404(Task, pk=task_id, sprint=sprint, deleted_at__isnull=True)
+        task.sprint = None
+        task.save(update_fields=["sprint", "updated_at"])
+        return Response(status=204)
+
+
+# ---------------------------------------------------------------------------
+# Board & BoardColumn views
+# ---------------------------------------------------------------------------
+
+class ProjectBoardListView(APIView):
+    """
+    GET  /api/projects/<pk>/boards/  — list boards
+    POST /api/projects/<pk>/boards/  — create board (PM/PO/SA)
+    """
+
+    def get(self, request, pk):
+        project = get_object_or_404(Project, pk=pk)
+        if not _can_view_project(request.user, project):
+            return Response({"detail": "Not found."}, status=404)
+        boards = Board.objects.filter(project=project).select_related("created_by").order_by("created_at")
+        return Response(BoardSerializer(boards, many=True).data)
+
+    def post(self, request, pk):
+        project = get_object_or_404(Project, pk=pk)
+        if not _can_manage_project(request.user, project):
+            return Response({"detail": "Insufficient permissions."}, status=403)
+        serializer = BoardCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        board = Board.objects.create(
+            project=project,
+            created_by=request.user,
+            name=data["name"],
+            type=data["type"],
+            is_default=data.get("is_default", False),
+        )
+        board = Board.objects.select_related("created_by").get(pk=board.pk)
+        return Response(BoardSerializer(board).data, status=201)
+
+
+class BoardDetailView(APIView):
+    """
+    GET    /api/boards/<pk>/  — get board
+    PATCH  /api/boards/<pk>/  — update board (PM/PO/SA)
+    DELETE /api/boards/<pk>/  — delete board (PM/PO/SA)
+    """
+
+    def _get_board(self, pk):
+        return get_object_or_404(Board.objects.select_related("project", "created_by"), pk=pk)
+
+    def get(self, request, pk):
+        board = self._get_board(pk)
+        if not _can_view_project(request.user, board.project):
+            return Response({"detail": "Not found."}, status=404)
+        return Response(BoardSerializer(board).data)
+
+    def patch(self, request, pk):
+        board = self._get_board(pk)
+        if not _can_manage_project(request.user, board.project):
+            return Response({"detail": "Insufficient permissions."}, status=403)
+        serializer = BoardUpdateSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        for field, value in serializer.validated_data.items():
+            setattr(board, field, value)
+        board.save()
+        return Response(BoardSerializer(board).data)
+
+    def delete(self, request, pk):
+        board = self._get_board(pk)
+        if not _can_manage_project(request.user, board.project):
+            return Response({"detail": "Insufficient permissions."}, status=403)
+        board.delete()
+        return Response(status=204)
+
+
+class BoardColumnListView(APIView):
+    """
+    GET  /api/boards/<pk>/columns/  — list columns
+    POST /api/boards/<pk>/columns/  — create column (PM/PO/SA)
+    """
+
+    def get(self, request, pk):
+        board = get_object_or_404(Board.objects.select_related("project"), pk=pk)
+        if not _can_view_project(request.user, board.project):
+            return Response({"detail": "Not found."}, status=404)
+        columns = BoardColumn.objects.filter(board=board).order_by("position")
+        return Response(BoardColumnSerializer(columns, many=True).data)
+
+    def post(self, request, pk):
+        board = get_object_or_404(Board.objects.select_related("project"), pk=pk)
+        if not _can_manage_project(request.user, board.project):
+            return Response({"detail": "Insufficient permissions."}, status=403)
+        serializer = BoardColumnCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        column = BoardColumn.objects.create(board=board, **data)
+        return Response(BoardColumnSerializer(column).data, status=201)
+
+
+class BoardColumnDetailView(APIView):
+    """
+    PATCH  /api/boards/<board_pk>/columns/<pk>/  — update column
+    DELETE /api/boards/<board_pk>/columns/<pk>/  — delete column
+    """
+
+    def _get_column(self, board_pk, pk):
+        board = get_object_or_404(Board.objects.select_related("project"), pk=board_pk)
+        column = get_object_or_404(BoardColumn, pk=pk, board=board)
+        return board, column
+
+    def patch(self, request, board_pk, pk):
+        board, column = self._get_column(board_pk, pk)
+        if not _can_manage_project(request.user, board.project):
+            return Response({"detail": "Insufficient permissions."}, status=403)
+        serializer = BoardColumnUpdateSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        for field, value in serializer.validated_data.items():
+            setattr(column, field, value)
+        column.save()
+        return Response(BoardColumnSerializer(column).data)
+
+    def delete(self, request, board_pk, pk):
+        board, column = self._get_column(board_pk, pk)
+        if not _can_manage_project(request.user, board.project):
+            return Response({"detail": "Insufficient permissions."}, status=403)
+        column.delete()
         return Response(status=204)
