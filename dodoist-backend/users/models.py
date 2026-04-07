@@ -45,10 +45,14 @@ class User(AbstractBaseUser):
 class UserSession(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="sessions")
+    # Short-lived access token (15 minutes)
     token_hash = models.CharField(max_length=255)
+    expires_at = models.DateTimeField()
+    # Long-lived refresh token (7 days), sent as HttpOnly cookie
+    refresh_token_hash = models.CharField(max_length=255, unique=True)
+    refresh_expires_at = models.DateTimeField()
     device_info = models.CharField(max_length=512, blank=True, default="")
     ip_address = models.GenericIPAddressField(null=True, blank=True)
-    expires_at = models.DateTimeField()
     created_at = models.DateTimeField(default=tz.now)
 
     class Meta:
@@ -59,6 +63,9 @@ class UserSession(models.Model):
 
     def is_expired(self) -> bool:
         return tz.now() >= self.expires_at
+
+    def is_refresh_expired(self) -> bool:
+        return tz.now() >= self.refresh_expires_at
 
 
 class UserPreferences(models.Model):
@@ -98,3 +105,39 @@ class UserPreferences(models.Model):
 
     def __str__(self):
         return f"Preferences({self.user_id})"
+
+
+class NotificationType(models.TextChoices):
+    ASSIGNED = "assigned", "Assigned"
+    MENTIONED = "mentioned", "Mentioned"
+    COMMENTED = "commented", "Commented"
+    STATUS_CHANGED = "status_changed", "Status Changed"
+    DUE_SOON = "due_soon", "Due Soon"
+    OVERDUE = "overdue", "Overdue"
+    INVITED = "invited", "Invited"
+    ROLE_CHANGED = "role_changed", "Role Changed"
+
+
+class Notification(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name="notifications")
+    actor = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="triggered_notifications"
+    )
+    type = models.CharField(max_length=20, choices=NotificationType.choices)
+    task_id = models.UUIDField(null=True, blank=True)
+    project_id = models.UUIDField(null=True, blank=True)
+    message = models.TextField()
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(default=tz.now)
+    read_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "notifications"
+        indexes = [
+            models.Index(fields=["recipient", "is_read"]),
+            models.Index(fields=["created_at"]),
+        ]
+
+    def __str__(self):
+        return f"Notification({self.type}, recipient={self.recipient_id})"

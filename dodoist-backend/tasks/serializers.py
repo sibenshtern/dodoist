@@ -13,9 +13,16 @@ class UserBriefSerializer(serializers.Serializer):
     email = serializers.EmailField()
 
 
+class LabelBriefSerializer(serializers.Serializer):
+    id = serializers.UUIDField(source='label.id')
+    name = serializers.CharField(source='label.name')
+    color = serializers.CharField(source='label.color')
+
+
 class TaskSerializer(serializers.ModelSerializer):
     created_by = UserBriefSerializer(read_only=True)
     assigned_to = UserBriefSerializer(read_only=True)
+    labels = LabelBriefSerializer(source='task_labels', many=True, read_only=True)
     is_deleted = serializers.SerializerMethodField()
     is_overdue = serializers.SerializerMethodField()
 
@@ -29,6 +36,7 @@ class TaskSerializer(serializers.ModelSerializer):
             "board_column",
             "created_by",
             "assigned_to",
+            "labels",
             "title",
             "description",
             "type",
@@ -330,6 +338,7 @@ class ProjectTaskCreateSerializer(serializers.Serializer):
     due_date = serializers.DateTimeField(required=False, allow_null=True)
     start_date = serializers.DateTimeField(required=False, allow_null=True)
     is_private = serializers.BooleanField(default=False)
+    reminder_at = serializers.DateTimeField(required=False, allow_null=True)
 
     def validate(self, data):
         errors = {}
@@ -383,3 +392,107 @@ class ProjectTaskCreateSerializer(serializers.Serializer):
             priority=priority,
             **validated_data,
         )
+
+
+# ---------------------------------------------------------------------------
+# Comment serializers
+# ---------------------------------------------------------------------------
+
+class CommentAuthorSerializer(serializers.Serializer):
+    id = serializers.UUIDField()
+    display_name = serializers.CharField()
+    avatar_url = serializers.CharField()
+
+
+class CommentSerializer(serializers.Serializer):
+    id = serializers.UUIDField()
+    task_id = serializers.UUIDField()
+    author = CommentAuthorSerializer()
+    parent_comment_id = serializers.UUIDField(allow_null=True)
+    body = serializers.JSONField()
+    is_edited = serializers.BooleanField()
+    created_at = serializers.DateTimeField()
+    updated_at = serializers.DateTimeField()
+
+
+class CommentCreateSerializer(serializers.Serializer):
+    body = serializers.JSONField()
+    parent_comment_id = serializers.UUIDField(required=False, allow_null=True)
+
+
+class CommentUpdateSerializer(serializers.Serializer):
+    body = serializers.JSONField()
+
+
+# ---------------------------------------------------------------------------
+# Activity serializers
+# ---------------------------------------------------------------------------
+
+class ActivityActorSerializer(serializers.Serializer):
+    id = serializers.UUIDField()
+    display_name = serializers.CharField()
+
+
+class ActivityLogSerializer(serializers.Serializer):
+    id = serializers.UUIDField()
+    entity_type = serializers.CharField()
+    entity_id = serializers.UUIDField()
+    actor = ActivityActorSerializer()
+    action = serializers.CharField()
+    old_value = serializers.JSONField(allow_null=True)
+    new_value = serializers.JSONField(allow_null=True)
+    created_at = serializers.DateTimeField()
+
+
+# ---------------------------------------------------------------------------
+# Custom field serializers
+# ---------------------------------------------------------------------------
+
+class CustomFieldSerializer(serializers.Serializer):
+    id = serializers.UUIDField()
+    project_id = serializers.UUIDField()
+    name = serializers.CharField()
+    field_type = serializers.CharField()
+    options = serializers.JSONField(allow_null=True)
+    is_required = serializers.BooleanField()
+    position = serializers.IntegerField()
+    created_by = serializers.SerializerMethodField()
+    created_at = serializers.DateTimeField()
+
+    def get_created_by(self, obj):
+        return {"id": str(obj.created_by_id), "display_name": obj.created_by.display_name}
+
+
+class CustomFieldCreateSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=100)
+    field_type = serializers.ChoiceField(
+        choices=["text", "number", "date", "select", "multi_select", "user", "url"]
+    )
+    options = serializers.JSONField(required=False, allow_null=True)
+    is_required = serializers.BooleanField(default=False)
+    position = serializers.IntegerField(default=0, min_value=0)
+
+
+class CustomFieldUpdateSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=100, required=False)
+    options = serializers.JSONField(required=False, allow_null=True)
+    is_required = serializers.BooleanField(required=False)
+    position = serializers.IntegerField(required=False, min_value=0)
+
+
+class TaskCustomFieldValueSerializer(serializers.Serializer):
+    custom_field_id = serializers.UUIDField()
+    field_name = serializers.SerializerMethodField()
+    field_type = serializers.SerializerMethodField()
+    value = serializers.CharField(allow_blank=True)
+    updated_at = serializers.DateTimeField()
+
+    def get_field_name(self, obj):
+        return obj.custom_field.name
+
+    def get_field_type(self, obj):
+        return obj.custom_field.field_type
+
+
+class TaskCustomFieldValueSetSerializer(serializers.Serializer):
+    value = serializers.CharField(allow_blank=True)

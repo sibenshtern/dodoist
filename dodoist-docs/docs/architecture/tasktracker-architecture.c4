@@ -71,9 +71,7 @@ views {
     include
       endUser,
       systemAdmin,
-      taskTracker.angularSpa,
-      taskTracker.djangoApi,
-      taskTracker.postgresDb
+      taskTracker.*
 
     style endUser, systemAdmin {
       shape person

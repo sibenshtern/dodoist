@@ -1,12 +1,20 @@
+from datetime import timedelta
+
+from django.db.models import Sum
 from django.shortcuts import get_object_or_404
+from django.utils import timezone as tz
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from projects.models import Label, Project, ProjectMember, ProjectRole
+from projects.models import Label, Project, ProjectMember, ProjectRole, ProjectStatus, ProjectType, Sprint, SprintStatus, TaskStatus
 from users.models import User
 
-from .models import Task, TaskDependency, TaskGuestAccess
+from .models import ActivityLog, Comment, Task, TaskDependency, TaskGuestAccess
 from .serializers import (
+    ActivityLogSerializer,
+    CommentCreateSerializer,
+    CommentSerializer,
+    CommentUpdateSerializer,
     ProjectTaskCreateSerializer,
     TaskAssignmentAddSerializer,
     TaskAssignmentSerializer,
@@ -19,7 +27,7 @@ from .serializers import (
     TaskSerializer,
     TaskUpdateSerializer,
 )
-from .services import AccessControlService, TaskService
+from .services import AccessControlService, CommentService, TaskService
 
 _VALID_SORT_FIELDS = {"created_at", "due_date", "priority", "position"}
 
@@ -29,6 +37,33 @@ def _can_manage_guest_access(user, task):
         return True
     membership = ProjectMember.objects.filter(project=task.project, user=user).first()
     return membership and membership.role in (ProjectRole.PO, ProjectRole.PM)
+
+
+def _get_or_create_personal_project(user):
+    """
+    Returns the user's personal project, creating it if it doesn't exist.
+    Used when a task is created without specifying a project.
+    """
+    from projects.models import Workspace
+    personal_ws = Workspace.objects.filter(owner=user, is_personal=True).first()
+    if not personal_ws:
+        from projects.services import WorkspaceService
+        personal_ws = WorkspaceService.create_personal_workspace(user)
+
+    project, created = Project.objects.get_or_create(
+        workspace=personal_ws,
+        type=ProjectType.PERSONAL,
+        defaults={
+            "name": "Personal",
+            "key": "PERS",
+            "status": ProjectStatus.ACTIVE,
+            "created_by": user,
+        },
+    )
+    if created:
+        ProjectMember.objects.create(project=project, user=user, role=ProjectRole.PO)
+
+    return project
 
 
 class TaskListCreateView(APIView):
@@ -56,6 +91,7 @@ class TaskListCreateView(APIView):
         tasks = (
             Task.objects.filter(project=project, deleted_at__isnull=True)
             .select_related("created_by", "assigned_to")
+            .prefetch_related("task_labels__label")
             .order_by("position", "created_at")
         )
 
@@ -86,7 +122,22 @@ class TaskListCreateView(APIView):
         return Response(TaskSerializer(tasks, many=True).data)
 
     def post(self, request):
-        serializer = TaskCreateSerializer(data=request.data)
+        # Resolve project: use the provided project_id or fall back to the user's personal project.
+        project_id = request.data.get("project_id")
+        if project_id:
+            try:
+                project = Project.objects.get(pk=project_id, status=ProjectStatus.ACTIVE)
+            except (Project.DoesNotExist, ValueError):
+                return Response({"detail": "Project not found."}, status=400)
+            if not request.user.has_elevated_access():
+                if not ProjectMember.objects.filter(project=project, user=request.user).exists():
+                    return Response({"detail": "You are not a member of this project."}, status=403)
+        else:
+            project = _get_or_create_personal_project(request.user)
+
+        # Always pass the resolved project_id to the serializer so validation works normally.
+        data = {**request.data, "project_id": str(project.id)}
+        serializer = TaskCreateSerializer(data=data)
         serializer.is_valid(raise_exception=True)
         try:
             task = serializer.save(creator=request.user)
@@ -118,6 +169,7 @@ class ProjectTaskListCreateView(APIView):
         tasks = (
             Task.objects.filter(project=project, deleted_at__isnull=True)
             .select_related("created_by", "assigned_to")
+            .prefetch_related("task_labels__label")
             .order_by("position", "created_at")
         )
 
@@ -408,3 +460,623 @@ class TaskGuestAccessDetailView(APIView):
             return Response({"detail": "Permission denied."}, status=403)
         TaskGuestAccess.objects.filter(task=task, user_id=user_id).delete()
         return Response(status=204)
+
+
+def _get_monday_of_week(dt):
+    """Returns midnight UTC on Monday of the week containing dt."""
+    import datetime as _dt
+    dt_utc = dt.astimezone(_dt.timezone.utc)
+    days_since_monday = dt_utc.weekday()
+    return (dt_utc - timedelta(days=days_since_monday)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+
+
+class DashboardStatsView(APIView):
+    """
+    GET /api/dashboard/stats/
+
+    Returns aggregated task statistics for the authenticated user.
+    """
+
+    def get(self, request):
+        user = request.user
+        now = tz.now()
+
+        open_statuses = [
+            TaskStatus.BACKLOG,
+            TaskStatus.TODO,
+            TaskStatus.IN_PROGRESS,
+            TaskStatus.IN_REVIEW,
+        ]
+
+        base_qs = Task.objects.filter(
+            assigned_to=user,
+            deleted_at__isnull=True,
+        )
+
+        open_tasks = base_qs.filter(status__in=open_statuses).count()
+
+        yesterday = now - timedelta(days=1)
+        open_tasks_delta = base_qs.filter(
+            status__in=open_statuses,
+            created_at__gte=yesterday,
+        ).count()
+
+        monday_this_week = _get_monday_of_week(now)
+        monday_last_week = monday_this_week - timedelta(weeks=1)
+
+        done_this_week = base_qs.filter(
+            status=TaskStatus.DONE,
+            completed_at__gte=monday_this_week,
+        ).count()
+
+        done_last_week = base_qs.filter(
+            status=TaskStatus.DONE,
+            completed_at__gte=monday_last_week,
+            completed_at__lt=monday_this_week,
+        ).count()
+
+        if done_last_week > 0:
+            done_this_week_delta_pct = round((done_this_week / done_last_week - 1) * 100)
+        else:
+            done_this_week_delta_pct = 0
+
+        overdue = base_qs.filter(
+            status__in=open_statuses,
+            due_date__lt=now,
+        ).count()
+
+        user_project_ids = ProjectMember.objects.filter(user=user).values_list("project_id", flat=True)
+        active_sprint = (
+            Sprint.objects.filter(
+                project_id__in=user_project_ids,
+                status=SprintStatus.ACTIVE,
+            )
+            .order_by("-start_date")
+            .first()
+        )
+
+        story_points = 0
+        story_points_total = 0
+        if active_sprint:
+            sprint_tasks = Task.objects.filter(
+                sprint=active_sprint,
+                deleted_at__isnull=True,
+            )
+            story_points = sprint_tasks.filter(status=TaskStatus.DONE).aggregate(
+                total=Sum("story_points")
+            )["total"] or 0
+            story_points_total = sprint_tasks.aggregate(
+                total=Sum("story_points")
+            )["total"] or 0
+
+        return Response({
+            "open_tasks": open_tasks,
+            "open_tasks_delta": open_tasks_delta,
+            "done_this_week": done_this_week,
+            "done_this_week_delta_pct": done_this_week_delta_pct,
+            "story_points": story_points,
+            "story_points_total": story_points_total,
+            "overdue": overdue,
+        })
+
+
+# ---------------------------------------------------------------------------
+# Comment views
+# ---------------------------------------------------------------------------
+
+class TaskCommentListView(APIView):
+    """
+    GET  /api/tasks/<pk>/comments/  — list non-deleted comments
+    POST /api/tasks/<pk>/comments/  — add a comment
+    """
+
+    def _get_task(self, pk, user):
+        task = get_object_or_404(Task, pk=pk, deleted_at__isnull=True)
+        if not AccessControlService.can_view_task(user, task):
+            return None
+        return task
+
+    def get(self, request, pk):
+        task = self._get_task(pk, request.user)
+        if not task:
+            return Response({"detail": "Not found."}, status=404)
+        comments = (
+            Comment.objects.filter(task=task, deleted_at__isnull=True)
+            .select_related("author")
+            .order_by("created_at")
+        )
+        return Response(CommentSerializer(comments, many=True).data)
+
+    def post(self, request, pk):
+        task = self._get_task(pk, request.user)
+        if not task:
+            return Response({"detail": "Not found."}, status=404)
+        serializer = CommentCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        parent = None
+        if data.get("parent_comment_id"):
+            parent = get_object_or_404(
+                Comment, pk=data["parent_comment_id"], task=task, deleted_at__isnull=True
+            )
+
+        comment = CommentService.add_comment(
+            task=task,
+            author=request.user,
+            body=data["body"],
+            parent_comment=parent,
+        )
+        comment = Comment.objects.select_related("author").get(pk=comment.pk)
+        return Response(CommentSerializer(comment).data, status=201)
+
+
+class CommentDetailView(APIView):
+    """
+    PATCH  /api/comments/<pk>/  — edit comment (author or SA)
+    DELETE /api/comments/<pk>/  — soft-delete (author, PM, PO, or SA)
+    """
+
+    def _get_comment(self, pk):
+        return get_object_or_404(Comment, pk=pk, deleted_at__isnull=True)
+
+    def patch(self, request, pk):
+        comment = self._get_comment(pk)
+        is_author = comment.author_id == request.user.pk
+        is_sa = request.user.global_role == "SA"
+        if not is_author and not is_sa:
+            return Response({"detail": "Only the author or SA can edit this comment."}, status=403)
+        serializer = CommentUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        comment = CommentService.edit_comment(comment, request.user, serializer.validated_data["body"])
+        comment = Comment.objects.select_related("author").get(pk=comment.pk)
+        return Response(CommentSerializer(comment).data)
+
+    def delete(self, request, pk):
+        comment = self._get_comment(pk)
+        is_author = comment.author_id == request.user.pk
+        is_elevated = request.user.has_elevated_access()
+        membership = ProjectMember.objects.filter(
+            project=comment.task.project, user=request.user
+        ).first()
+        is_pm_or_po = membership and membership.role in (ProjectRole.PO, ProjectRole.PM)
+        if not is_author and not is_elevated and not is_pm_or_po:
+            return Response({"detail": "Insufficient permissions."}, status=403)
+        CommentService.soft_delete_comment(comment, request.user)
+        return Response(status=204)
+
+
+# ---------------------------------------------------------------------------
+# Activity views
+# ---------------------------------------------------------------------------
+
+class ProjectActivityView(APIView):
+    """
+    GET /api/projects/<pk>/activity/  — project activity feed
+    """
+
+    def get(self, request, pk):
+        project = get_object_or_404(Project, pk=pk)
+        if not request.user.has_elevated_access():
+            if not ProjectMember.objects.filter(project=project, user=request.user).exists():
+                return Response({"detail": "Not found."}, status=404)
+
+        qs = (
+            ActivityLog.objects.filter(project=project)
+            .select_related("actor")
+            .order_by("-created_at")
+        )
+        if entity_type := request.query_params.get("entity_type"):
+            qs = qs.filter(entity_type=entity_type)
+        if actor_id := request.query_params.get("actor_id"):
+            qs = qs.filter(actor_id=actor_id)
+        if action := request.query_params.get("action"):
+            qs = qs.filter(action=action)
+        if since := request.query_params.get("since"):
+            qs = qs.filter(created_at__gte=since)
+        if until := request.query_params.get("until"):
+            qs = qs.filter(created_at__lte=until)
+
+        limit = min(int(request.query_params.get("limit", 50)), 100)
+        return Response(ActivityLogSerializer(qs[:limit], many=True).data)
+
+
+class TaskActivityView(APIView):
+    """
+    GET /api/tasks/<pk>/activity/  — task activity feed
+    """
+
+    def get(self, request, pk):
+        task = get_object_or_404(Task, pk=pk, deleted_at__isnull=True)
+        if not AccessControlService.can_view_task(request.user, task):
+            return Response({"detail": "Not found."}, status=404)
+        qs = (
+            ActivityLog.objects.filter(entity_type="task", entity_id=task.pk)
+            .select_related("actor")
+            .order_by("-created_at")
+        )
+        limit = min(int(request.query_params.get("limit", 50)), 100)
+        return Response(ActivityLogSerializer(qs[:limit], many=True).data)
+
+
+# ---------------------------------------------------------------------------
+# Custom field views
+# ---------------------------------------------------------------------------
+
+class ProjectCustomFieldListView(APIView):
+    """
+    GET  /api/projects/<pk>/custom-fields/  — list fields
+    POST /api/projects/<pk>/custom-fields/  — create field (PO/PM/SA/GA)
+    """
+
+    def get(self, request, pk):
+        project = get_object_or_404(Project, pk=pk)
+        if not request.user.has_elevated_access():
+            if not ProjectMember.objects.filter(project=project, user=request.user).exists():
+                return Response({"detail": "Not found."}, status=404)
+        from tasks.models import CustomField
+        from tasks.serializers import CustomFieldSerializer
+        fields = CustomField.objects.filter(project=project).select_related("created_by").order_by("position")
+        return Response(CustomFieldSerializer(fields, many=True).data)
+
+    def post(self, request, pk):
+        project = get_object_or_404(Project, pk=pk)
+        if not request.user.has_elevated_access():
+            m = ProjectMember.objects.filter(project=project, user=request.user).first()
+            if not m or m.role not in (ProjectRole.PO, ProjectRole.PM):
+                return Response({"detail": "Insufficient permissions."}, status=403)
+        from tasks.models import CustomField
+        from tasks.serializers import CustomFieldCreateSerializer, CustomFieldSerializer
+        serializer = CustomFieldCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        field = CustomField.objects.create(project=project, created_by=request.user, **data)
+        field = CustomField.objects.select_related("created_by").get(pk=field.pk)
+        return Response(CustomFieldSerializer(field).data, status=201)
+
+
+class ProjectCustomFieldDetailView(APIView):
+    """
+    PATCH  /api/projects/<pk>/custom-fields/<field_id>/
+    DELETE /api/projects/<pk>/custom-fields/<field_id>/
+    """
+
+    def _get_field(self, pk, field_id):
+        project = get_object_or_404(Project, pk=pk)
+        from tasks.models import CustomField
+        return project, get_object_or_404(CustomField, pk=field_id, project=project)
+
+    def _check_manage_perm(self, user, project):
+        if user.has_elevated_access():
+            return True
+        m = ProjectMember.objects.filter(project=project, user=user).first()
+        return m and m.role in (ProjectRole.PO, ProjectRole.PM)
+
+    def patch(self, request, pk, field_id):
+        project, field = self._get_field(pk, field_id)
+        if not self._check_manage_perm(request.user, project):
+            return Response({"detail": "Insufficient permissions."}, status=403)
+        from tasks.serializers import CustomFieldSerializer, CustomFieldUpdateSerializer
+        serializer = CustomFieldUpdateSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        for attr, value in serializer.validated_data.items():
+            setattr(field, attr, value)
+        field.save()
+        from tasks.models import CustomField
+        field = CustomField.objects.select_related("created_by").get(pk=field.pk)
+        return Response(CustomFieldSerializer(field).data)
+
+    def delete(self, request, pk, field_id):
+        project, field = self._get_field(pk, field_id)
+        if not (request.user.global_role == "SA" or (
+            ProjectMember.objects.filter(project=project, user=request.user, role=ProjectRole.PO).exists()
+        )):
+            return Response({"detail": "Only PO or SA can delete custom fields."}, status=403)
+        field.delete()
+        return Response(status=204)
+
+
+class TaskCustomFieldValueListView(APIView):
+    """
+    GET /api/tasks/<pk>/custom-field-values/  — list all values for task
+    """
+
+    def get(self, request, pk):
+        task = get_object_or_404(Task, pk=pk, deleted_at__isnull=True)
+        if not AccessControlService.can_view_task(request.user, task):
+            return Response({"detail": "Not found."}, status=404)
+        from tasks.models import TaskCustomFieldValue
+        from tasks.serializers import TaskCustomFieldValueSerializer
+        values = (
+            TaskCustomFieldValue.objects.filter(task=task)
+            .select_related("custom_field")
+        )
+        return Response(TaskCustomFieldValueSerializer(values, many=True).data)
+
+
+class TaskCustomFieldValueDetailView(APIView):
+    """
+    PUT /api/tasks/<pk>/custom-field-values/<field_id>/  — set value
+    """
+
+    def put(self, request, pk, field_id):
+        task = get_object_or_404(Task, pk=pk, deleted_at__isnull=True)
+        if not AccessControlService.can_edit_task(request.user, task):
+            return Response({"detail": "Insufficient permissions."}, status=403)
+        from tasks.models import CustomField, TaskCustomFieldValue
+        from tasks.serializers import TaskCustomFieldValueSerializer, TaskCustomFieldValueSetSerializer
+        field = get_object_or_404(CustomField, pk=field_id, project=task.project)
+        serializer = TaskCustomFieldValueSetSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        value_obj, _ = TaskCustomFieldValue.objects.update_or_create(
+            task=task, custom_field=field,
+            defaults={"value": serializer.validated_data["value"]},
+        )
+        value_obj = TaskCustomFieldValue.objects.select_related("custom_field").get(pk=value_obj.pk)
+        return Response(TaskCustomFieldValueSerializer(value_obj).data)
+
+
+# ---------------------------------------------------------------------------
+# Reaction views
+# ---------------------------------------------------------------------------
+
+class CommentReactionView(APIView):
+    """
+    POST   /api/comments/<pk>/reactions/         — add reaction
+    DELETE /api/comments/<pk>/reactions/<emoji>/ — remove reaction
+    """
+
+    def post(self, request, pk):
+        comment = get_object_or_404(Comment, pk=pk, deleted_at__isnull=True)
+        emoji = request.data.get("emoji")
+        if not emoji:
+            return Response({"detail": "emoji is required."}, status=400)
+        from tasks.models import Reaction
+        _, created = Reaction.objects.get_or_create(comment=comment, user=request.user, emoji=emoji)
+        return Response({"emoji": emoji, "created": created}, status=201 if created else 200)
+
+    def delete(self, request, pk, emoji):
+        comment = get_object_or_404(Comment, pk=pk, deleted_at__isnull=True)
+        from tasks.models import Reaction
+        Reaction.objects.filter(comment=comment, user=request.user, emoji=emoji).delete()
+        return Response(status=204)
+
+
+# ---------------------------------------------------------------------------
+# TimeLog views
+# ---------------------------------------------------------------------------
+
+class TaskTimeLogListView(APIView):
+    """
+    GET  /api/tasks/<pk>/time-logs/  — list time logs
+    POST /api/tasks/<pk>/time-logs/  — create time log (min role: DEV)
+    """
+
+    def get(self, request, pk):
+        task = get_object_or_404(Task, pk=pk, deleted_at__isnull=True)
+        if not AccessControlService.can_view_task(request.user, task):
+            return Response({"detail": "Not found."}, status=404)
+        from tasks.models import TimeLog
+        qs = TimeLog.objects.filter(task=task).select_related("user").order_by("-logged_date")
+        since = request.query_params.get("since")
+        if since:
+            qs = qs.filter(logged_date__gte=since)
+        until = request.query_params.get("until")
+        if until:
+            qs = qs.filter(logged_date__lte=until)
+        data = [
+            {
+                "id": str(t.id),
+                "user": {"id": str(t.user_id), "display_name": t.user.display_name},
+                "logged_minutes": t.logged_minutes,
+                "logged_date": t.logged_date.isoformat(),
+                "description": t.description,
+                "created_at": t.created_at.isoformat(),
+            }
+            for t in qs
+        ]
+        total_minutes = sum(t.logged_minutes for t in qs)
+        return Response({"data": data, "meta": {"total_minutes": total_minutes}})
+
+    def post(self, request, pk):
+        task = get_object_or_404(Task, pk=pk, deleted_at__isnull=True)
+        if not AccessControlService.can_edit_task(request.user, task):
+            return Response({"detail": "Insufficient permissions."}, status=403)
+        logged_minutes = request.data.get("logged_minutes")
+        logged_date = request.data.get("logged_date")
+        if not logged_minutes or not logged_date:
+            return Response({"detail": "logged_minutes and logged_date are required."}, status=400)
+        if not (1 <= int(logged_minutes) <= 1440):
+            return Response({"detail": "logged_minutes must be between 1 and 1440."}, status=422)
+        from tasks.models import TimeLog
+        t = TimeLog.objects.create(
+            task=task,
+            user=request.user,
+            logged_minutes=int(logged_minutes),
+            logged_date=logged_date,
+            description=request.data.get("description", ""),
+        )
+        return Response({
+            "id": str(t.id),
+            "logged_minutes": t.logged_minutes,
+            "logged_date": t.logged_date.isoformat(),
+            "description": t.description,
+        }, status=201)
+
+
+class TimeLogDetailView(APIView):
+    """
+    PATCH  /api/time-logs/<pk>/  — update time log (owner or SA)
+    DELETE /api/time-logs/<pk>/  — delete time log (owner or SA)
+    """
+
+    def _get_log(self, pk, user):
+        from tasks.models import TimeLog
+        log = get_object_or_404(TimeLog, pk=pk)
+        if log.user_id != user.pk and user.global_role != "SA":
+            return None
+        return log
+
+    def patch(self, request, pk):
+        log = self._get_log(pk, request.user)
+        if not log:
+            return Response({"detail": "Forbidden."}, status=403)
+        if "logged_minutes" in request.data:
+            val = int(request.data["logged_minutes"])
+            if not (1 <= val <= 1440):
+                return Response({"detail": "logged_minutes must be between 1 and 1440."}, status=422)
+            log.logged_minutes = val
+        if "logged_date" in request.data:
+            log.logged_date = request.data["logged_date"]
+        if "description" in request.data:
+            log.description = request.data["description"]
+        log.save()
+        return Response({
+            "id": str(log.id),
+            "logged_minutes": log.logged_minutes,
+            "logged_date": log.logged_date.isoformat(),
+            "description": log.description,
+        })
+
+    def delete(self, request, pk):
+        log = self._get_log(pk, request.user)
+        if not log:
+            return Response({"detail": "Forbidden."}, status=403)
+        log.delete()
+        return Response(status=204)
+
+
+# ---------------------------------------------------------------------------
+# Home page: today tasks + user activity feed
+# ---------------------------------------------------------------------------
+
+def _due_label(due_date, now) -> str:
+    today = now.date()
+    due = due_date.date()
+    delta = (due - today).days
+    if delta == -1:
+        return "Yesterday"
+    if delta == 0:
+        return "Today"
+    if delta == 1:
+        return "Tomorrow"
+    return f"{due.day} {due.strftime('%b')}"
+
+
+class TodayTasksView(APIView):
+    """
+    GET /api/tasks/today/
+
+    Returns tasks assigned to the authenticated user due within ±3 days,
+    including overdue. Cancelled and deleted tasks are excluded.
+    """
+
+    def get(self, request):
+        now = tz.now()
+        window_start = now - timedelta(days=2)
+        window_end = now + timedelta(days=3)
+
+        tasks = (
+            Task.objects.filter(
+                assigned_to=request.user,
+                deleted_at__isnull=True,
+                due_date__range=(window_start, window_end),
+            )
+            .exclude(status=TaskStatus.CANCELLED)
+            .prefetch_related("task_labels__label")
+            .order_by("due_date")
+        )
+
+        result = []
+        for task in tasks:
+            first_label = task.task_labels.first()
+            label_name = first_label.label.name if first_label else ""
+            label_color = first_label.label.color if first_label else ""
+
+            result.append({
+                "id": str(task.id),
+                "title": task.title,
+                "label_name": label_name,
+                "label_color": label_color,
+                "due_label": _due_label(task.due_date, now),
+                "done": task.status == TaskStatus.DONE,
+            })
+
+        return Response(result)
+
+
+class UserActivityView(APIView):
+    """
+    GET /api/activity/
+
+    Returns the last N activity log entries across all projects
+    the authenticated user is a member of.
+    """
+
+    def get(self, request):
+        user_project_ids = ProjectMember.objects.filter(
+            user=request.user
+        ).values_list("project_id", flat=True)
+
+        qs = (
+            ActivityLog.objects.filter(project_id__in=user_project_ids)
+            .select_related("actor")
+            .order_by("-created_at")
+        )
+        limit = min(int(request.query_params.get("limit", 20)), 100)
+
+        def _time_ago(dt):
+            diff = tz.now() - dt
+            s = int(diff.total_seconds())
+            if s < 60:
+                return f"{s}s ago"
+            if s < 3600:
+                return f"{s // 60}m ago"
+            if s < 86400:
+                return f"{s // 3600}h ago"
+            return f"{s // 86400}d ago"
+
+        result = []
+        for entry in qs[:limit]:
+            target = ""
+            if entry.new_value:
+                target = entry.new_value.get("title", entry.new_value.get("name", ""))
+            result.append({
+                "id": str(entry.id),
+                "actor_name": entry.actor.display_name,
+                "action": entry.action,
+                "target": target,
+                "time_ago": _time_ago(entry.created_at),
+                "entity_type": entry.entity_type,
+                "entity_id": str(entry.entity_id),
+            })
+
+        return Response(result)
+
+
+
+class MyTasksView(APIView):
+    """
+    GET /api/tasks/my/ — tasks assigned to the current user across all projects.
+    Excludes cancelled and deleted tasks.
+
+    Query params:
+      status: comma-separated list of statuses to filter by
+    """
+
+    def get(self, request):
+        qs = (
+            Task.objects.filter(assigned_to=request.user, deleted_at__isnull=True)
+            .exclude(status="cancelled")
+            .select_related("project", "assigned_to", "created_by", "sprint", "board_column")
+            .prefetch_related("task_labels__label")
+            .order_by("status", "position", "created_at")
+        )
+
+        status_filter = request.query_params.get("status")
+        if status_filter:
+            qs = qs.filter(status__in=[s.strip() for s in status_filter.split(",")])
+
+        return Response(TaskSerializer(qs, many=True).data)

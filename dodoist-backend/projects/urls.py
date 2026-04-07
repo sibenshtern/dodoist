@@ -1,6 +1,10 @@
 from django.urls import path
 
 from .views import (
+    BoardColumnDetailView,
+    BoardColumnListView,
+    BoardDetailView,
+    ProjectBoardListView,
     LabelDetailView,
     LabelListCreateView,
     ProjectArchiveView,
@@ -8,7 +12,12 @@ from .views import (
     ProjectListCreateView,
     ProjectMemberDetailView,
     ProjectMemberListView,
+    ProjectSprintListView,
     ProjectUnarchiveView,
+    SprintCompleteView,
+    SprintDetailView,
+    SprintStartView,
+    SprintTaskView,
     WorkspaceDetailView,
     WorkspaceListCreateView,
     WorkspaceMemberDetailView,
@@ -37,4 +46,18 @@ urlpatterns = [
     # Labels (nested under workspace)
     path("api/workspaces/<slug:slug>/labels/", LabelListCreateView.as_view(), name="label-list-create"),
     path("api/workspaces/<slug:slug>/labels/<uuid:label_id>/", LabelDetailView.as_view(), name="label-detail"),
+
+    # Sprints
+    path("api/projects/<uuid:pk>/sprints/", ProjectSprintListView.as_view(), name="project-sprint-list"),
+    path("api/sprints/<uuid:pk>/", SprintDetailView.as_view(), name="sprint-detail"),
+    path("api/sprints/<uuid:pk>/start/", SprintStartView.as_view(), name="sprint-start"),
+    path("api/sprints/<uuid:pk>/complete/", SprintCompleteView.as_view(), name="sprint-complete"),
+    path("api/sprints/<uuid:pk>/tasks/", SprintTaskView.as_view(), name="sprint-task-add"),
+    path("api/sprints/<uuid:pk>/tasks/<uuid:task_id>/", SprintTaskView.as_view(), name="sprint-task-remove"),
+
+    # Boards
+    path("api/projects/<uuid:pk>/boards/", ProjectBoardListView.as_view(), name="project-board-list"),
+    path("api/boards/<uuid:pk>/", BoardDetailView.as_view(), name="board-detail"),
+    path("api/boards/<uuid:pk>/columns/", BoardColumnListView.as_view(), name="board-column-list"),
+    path("api/boards/<uuid:pk>/columns/<uuid:column_pk>/", BoardColumnDetailView.as_view(), name="board-column-detail"),
 ]
