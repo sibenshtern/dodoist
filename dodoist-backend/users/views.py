@@ -1,8 +1,7 @@
-from django.shortcuts import render
+import hashlib
+import secrets
+from datetime import timedelta
 
-<<<<<<< Updated upstream
-# Create your views here.
-=======
 from django.contrib.auth import authenticate
 from django.db import models
 from django.shortcuts import get_object_or_404
@@ -411,4 +410,3 @@ class NotificationReadAllView(APIView):
             is_read=True, read_at=now
         )
         return Response({"marked_count": count})
->>>>>>> Stashed changes

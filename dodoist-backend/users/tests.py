@@ -215,8 +215,6 @@ class TestUserService:
         deleted = UserService.cleanup_expired_sessions()
         assert deleted == 1
         assert UserSession.objects.filter(token_hash="valid").exists()
-<<<<<<< Updated upstream
-=======
 
 
 # ---------------------------------------------------------------------------
@@ -261,4 +259,3 @@ class TestMeView:
         client = APIClient()
         response = client.get("/api/users/me")
         assert response.status_code == 401
->>>>>>> Stashed changes
