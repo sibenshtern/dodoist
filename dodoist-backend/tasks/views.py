@@ -16,6 +16,7 @@ from .serializers import (
     CommentSerializer,
     CommentUpdateSerializer,
     ProjectTaskCreateSerializer,
+    ReactionSerializer,
     TaskAssignmentAddSerializer,
     TaskAssignmentSerializer,
     TaskCreateSerializer,
@@ -24,8 +25,12 @@ from .serializers import (
     TaskGuestAccessCreateSerializer,
     TaskGuestAccessSerializer,
     TaskLabelAddSerializer,
+    TaskLabelSerializer,
     TaskSerializer,
     TaskUpdateSerializer,
+    TimeLogCreateSerializer,
+    TimeLogSerializer,
+    TimeLogUpdateSerializer,
 )
 from .services import AccessControlService, CommentService, TaskService
 
@@ -317,8 +322,16 @@ class TaskSubtaskListView(APIView):
 
 class TaskAssignmentListView(APIView):
     """
+    GET  /api/tasks/<uuid>/assignments/ — list co-assignees
     POST /api/tasks/<uuid>/assignments/ — add a co-assignee
     """
+
+    def get(self, request, pk):
+        task = get_object_or_404(Task, pk=pk)
+        if not AccessControlService.can_view_task(request.user, task):
+            return Response({"detail": "Not found."}, status=404)
+        assignments = task.co_assignments.select_related("user", "assigned_by")
+        return Response(TaskAssignmentSerializer(assignments, many=True).data)
 
     def post(self, request, pk):
         task = get_object_or_404(Task, pk=pk)
@@ -348,8 +361,16 @@ class TaskAssignmentDetailView(APIView):
 
 class TaskLabelListView(APIView):
     """
+    GET  /api/tasks/<uuid>/labels/ — list labels on a task
     POST /api/tasks/<uuid>/labels/ — attach a label to a task
     """
+
+    def get(self, request, pk):
+        task = get_object_or_404(Task, pk=pk)
+        if not AccessControlService.can_view_task(request.user, task):
+            return Response({"detail": "Not found."}, status=404)
+        labels = task.task_labels.select_related("label")
+        return Response(TaskLabelSerializer(labels, many=True).data)
 
     def post(self, request, pk):
         task = get_object_or_404(Task, pk=pk)
@@ -408,8 +429,24 @@ class TaskDependencyListView(APIView):
 
 class TaskDependencyDetailView(APIView):
     """
+    PATCH  /api/tasks/<uuid>/dependencies/<dep_id>/ — update dependency type
     DELETE /api/tasks/<uuid>/dependencies/<dep_id>/ — remove a dependency
     """
+
+    def patch(self, request, pk, dep_id):
+        task = get_object_or_404(Task, pk=pk)
+        if not AccessControlService.can_edit_task(request.user, task):
+            return Response({"detail": "Permission denied."}, status=403)
+        dep = get_object_or_404(TaskDependency, pk=dep_id, task=task)
+        new_type = request.data.get("type")
+        if not new_type or new_type not in dict(TaskDependency._meta.get_field("type").choices if hasattr(TaskDependency._meta.get_field("type"), "choices") else []):
+            from .models import DependencyType
+            valid = [c[0] for c in DependencyType.choices]
+            if new_type not in valid:
+                return Response({"detail": f"type must be one of: {valid}"}, status=400)
+        dep.type = new_type
+        dep.save(update_fields=["type"])
+        return Response(TaskDependencySerializer(dep).data)
 
     def delete(self, request, pk, dep_id):
         task = get_object_or_404(Task, pk=pk)
@@ -824,9 +861,16 @@ class TaskCustomFieldValueDetailView(APIView):
 
 class CommentReactionView(APIView):
     """
+    GET    /api/comments/<pk>/reactions/         — list reactions
     POST   /api/comments/<pk>/reactions/         — add reaction
     DELETE /api/comments/<pk>/reactions/<emoji>/ — remove reaction
     """
+
+    def get(self, request, pk):
+        comment = get_object_or_404(Comment, pk=pk, deleted_at__isnull=True)
+        from tasks.models import Reaction
+        reactions = Reaction.objects.filter(comment=comment).select_related("user")
+        return Response(ReactionSerializer(reactions, many=True).data)
 
     def post(self, request, pk):
         comment = get_object_or_404(Comment, pk=pk, deleted_at__isnull=True)
@@ -834,14 +878,55 @@ class CommentReactionView(APIView):
         if not emoji:
             return Response({"detail": "emoji is required."}, status=400)
         from tasks.models import Reaction
-        _, created = Reaction.objects.get_or_create(comment=comment, user=request.user, emoji=emoji)
-        return Response({"emoji": emoji, "created": created}, status=201 if created else 200)
+        reaction, created = Reaction.objects.get_or_create(comment=comment, user=request.user, emoji=emoji)
+        return Response(ReactionSerializer(reaction).data, status=201 if created else 200)
 
     def delete(self, request, pk, emoji):
         comment = get_object_or_404(Comment, pk=pk, deleted_at__isnull=True)
         from tasks.models import Reaction
         Reaction.objects.filter(comment=comment, user=request.user, emoji=emoji).delete()
         return Response(status=204)
+
+
+# ---------------------------------------------------------------------------
+# Move-to-column / restore
+# ---------------------------------------------------------------------------
+
+class TaskMoveColumnView(APIView):
+    """
+    POST /api/tasks/<pk>/move-column/ — move task to a board column
+    """
+
+    def post(self, request, pk):
+        task = get_object_or_404(Task, pk=pk, deleted_at__isnull=True)
+        if not AccessControlService.can_edit_task(request.user, task):
+            return Response({"detail": "Permission denied."}, status=403)
+        column_id = request.data.get("column_id")
+        if not column_id:
+            return Response({"detail": "column_id is required."}, status=400)
+        from projects.models import BoardColumn
+        column = get_object_or_404(BoardColumn, pk=column_id)
+        try:
+            task = TaskService.move_to_column(task, column, request.user)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=400)
+        return Response(TaskSerializer(task).data)
+
+
+class TaskRestoreView(APIView):
+    """
+    POST /api/tasks/<pk>/restore/ — restore a soft-deleted task
+    """
+
+    def post(self, request, pk):
+        task = get_object_or_404(Task, pk=pk)
+        if not AccessControlService.can_edit_task(request.user, task):
+            return Response({"detail": "Permission denied."}, status=403)
+        try:
+            task = TaskService.restore(task, request.user)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=400)
+        return Response(TaskSerializer(task).data)
 
 
 # ---------------------------------------------------------------------------
@@ -866,44 +951,23 @@ class TaskTimeLogListView(APIView):
         until = request.query_params.get("until")
         if until:
             qs = qs.filter(logged_date__lte=until)
-        data = [
-            {
-                "id": str(t.id),
-                "user": {"id": str(t.user_id), "display_name": t.user.display_name},
-                "logged_minutes": t.logged_minutes,
-                "logged_date": t.logged_date.isoformat(),
-                "description": t.description,
-                "created_at": t.created_at.isoformat(),
-            }
-            for t in qs
-        ]
         total_minutes = sum(t.logged_minutes for t in qs)
-        return Response({"data": data, "meta": {"total_minutes": total_minutes}})
+        return Response({"data": TimeLogSerializer(qs, many=True).data, "meta": {"total_minutes": total_minutes}})
 
     def post(self, request, pk):
         task = get_object_or_404(Task, pk=pk, deleted_at__isnull=True)
         if not AccessControlService.can_edit_task(request.user, task):
             return Response({"detail": "Insufficient permissions."}, status=403)
-        logged_minutes = request.data.get("logged_minutes")
-        logged_date = request.data.get("logged_date")
-        if not logged_minutes or not logged_date:
-            return Response({"detail": "logged_minutes and logged_date are required."}, status=400)
-        if not (1 <= int(logged_minutes) <= 1440):
-            return Response({"detail": "logged_minutes must be between 1 and 1440."}, status=422)
+        serializer = TimeLogCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
         from tasks.models import TimeLog
         t = TimeLog.objects.create(
             task=task,
             user=request.user,
-            logged_minutes=int(logged_minutes),
-            logged_date=logged_date,
-            description=request.data.get("description", ""),
+            **serializer.validated_data,
         )
-        return Response({
-            "id": str(t.id),
-            "logged_minutes": t.logged_minutes,
-            "logged_date": t.logged_date.isoformat(),
-            "description": t.description,
-        }, status=201)
+        t_with_user = TimeLog.objects.select_related("user").get(pk=t.pk)
+        return Response(TimeLogSerializer(t_with_user).data, status=201)
 
 
 class TimeLogDetailView(APIView):
@@ -923,22 +987,14 @@ class TimeLogDetailView(APIView):
         log = self._get_log(pk, request.user)
         if not log:
             return Response({"detail": "Forbidden."}, status=403)
-        if "logged_minutes" in request.data:
-            val = int(request.data["logged_minutes"])
-            if not (1 <= val <= 1440):
-                return Response({"detail": "logged_minutes must be between 1 and 1440."}, status=422)
-            log.logged_minutes = val
-        if "logged_date" in request.data:
-            log.logged_date = request.data["logged_date"]
-        if "description" in request.data:
-            log.description = request.data["description"]
+        serializer = TimeLogUpdateSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        for field, value in serializer.validated_data.items():
+            setattr(log, field, value)
         log.save()
-        return Response({
-            "id": str(log.id),
-            "logged_minutes": log.logged_minutes,
-            "logged_date": log.logged_date.isoformat(),
-            "description": log.description,
-        })
+        from tasks.models import TimeLog
+        log = TimeLog.objects.select_related("user").get(pk=log.pk)
+        return Response(TimeLogSerializer(log).data)
 
     def delete(self, request, pk):
         log = self._get_log(pk, request.user)

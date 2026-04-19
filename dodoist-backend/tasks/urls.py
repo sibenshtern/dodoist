@@ -25,6 +25,8 @@ from .views import (
     TaskLabelDetailView,
     TaskLabelListView,
     TaskListCreateView,
+    TaskMoveColumnView,
+    TaskRestoreView,
     TaskSubtaskListView,
     TaskTimeLogListView,
     TimeLogDetailView,
@@ -82,6 +84,10 @@ urlpatterns = [
     # Reactions
     path("api/comments/<uuid:pk>/reactions/", CommentReactionView.as_view(), name="comment-reactions"),
     path("api/comments/<uuid:pk>/reactions/<str:emoji>/", CommentReactionView.as_view(), name="comment-reaction-delete"),
+
+    # Move column / restore
+    path("api/tasks/<uuid:pk>/move-column/", TaskMoveColumnView.as_view(), name="task-move-column"),
+    path("api/tasks/<uuid:pk>/restore/", TaskRestoreView.as_view(), name="task-restore"),
 
     # Time logs
     path("api/tasks/<uuid:pk>/time-logs/", TaskTimeLogListView.as_view(), name="task-time-logs"),

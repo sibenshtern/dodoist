@@ -80,6 +80,7 @@ class TaskCreateSerializer(serializers.Serializer):
     story_points = serializers.IntegerField(min_value=0, required=False, allow_null=True)
     due_date = serializers.DateTimeField(required=False, allow_null=True)
     start_date = serializers.DateTimeField(required=False, allow_null=True)
+    reminder_at = serializers.DateTimeField(required=False, allow_null=True)
     is_private = serializers.BooleanField(default=False)
 
     def validate_project_id(self, value):
@@ -496,3 +497,38 @@ class TaskCustomFieldValueSerializer(serializers.Serializer):
 
 class TaskCustomFieldValueSetSerializer(serializers.Serializer):
     value = serializers.CharField(allow_blank=True)
+
+
+# ---------------------------------------------------------------------------
+# TimeLog serializers
+# ---------------------------------------------------------------------------
+
+class TimeLogSerializer(serializers.Serializer):
+    id = serializers.UUIDField()
+    user = UserBriefSerializer()
+    logged_minutes = serializers.IntegerField()
+    logged_date = serializers.DateField()
+    description = serializers.CharField(allow_blank=True)
+    created_at = serializers.DateTimeField()
+
+
+class TimeLogCreateSerializer(serializers.Serializer):
+    logged_minutes = serializers.IntegerField(min_value=1, max_value=1440)
+    logged_date = serializers.DateField()
+    description = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class TimeLogUpdateSerializer(serializers.Serializer):
+    logged_minutes = serializers.IntegerField(min_value=1, max_value=1440, required=False)
+    logged_date = serializers.DateField(required=False)
+    description = serializers.CharField(required=False, allow_blank=True)
+
+
+# ---------------------------------------------------------------------------
+# Reaction serializers
+# ---------------------------------------------------------------------------
+
+class ReactionSerializer(serializers.Serializer):
+    emoji = serializers.CharField()
+    user = UserBriefSerializer()
+    created_at = serializers.DateTimeField()
