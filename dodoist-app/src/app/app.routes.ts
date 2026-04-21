@@ -26,42 +26,61 @@ export const routes: Routes = [
     loadComponent: () =>
       import('./pages/docs/docs.component').then(m => m.DocsComponent),
   },
+  // ── Dashboard shell — all authenticated pages live here ──────────────────
   {
-    path: 'home',
+    path: '',
     canActivate: [authGuard],
     loadComponent: () =>
-      import('./pages/home/home.component').then(m => m.HomeComponent),
-  },
-  {
-    path: 'tasks',
-    canActivate: [authGuard],
-    loadComponent: () =>
-      import('./pages/my-tasks/my-tasks.component').then(m => m.MyTasksComponent),
-  },
-  {
-    path: 'task/new',
-    canActivate: [authGuard],
-    loadComponent: () =>
-      import('./pages/task-create/task-create.component').then(m => m.TaskCreateComponent),
-  },
-  // Placeholder routes — prevent silent redirects to landing page
-  {
-    path: 'today',
-    canActivate: [authGuard],
-    loadComponent: () =>
-      import('./pages/coming-soon/coming-soon.component').then(m => m.ComingSoonComponent),
-  },
-  {
-    path: 'inbox',
-    canActivate: [authGuard],
-    loadComponent: () =>
-      import('./pages/coming-soon/coming-soon.component').then(m => m.ComingSoonComponent),
-  },
-  {
-    path: 'projects',
-    canActivate: [authGuard],
-    loadComponent: () =>
-      import('./pages/coming-soon/coming-soon.component').then(m => m.ComingSoonComponent),
+      import('./layouts/dashboard-layout/dashboard-layout.component').then(
+        m => m.DashboardLayoutComponent,
+      ),
+    children: [
+      {
+        path: 'home',
+        loadComponent: () =>
+          import('./pages/home/home.component').then(m => m.HomeComponent),
+      },
+      {
+        path: 'tasks',
+        loadComponent: () =>
+          import('./pages/my-tasks/my-tasks.component').then(m => m.MyTasksComponent),
+      },
+      {
+        path: 'task/new',
+        loadComponent: () =>
+          import('./pages/task-create/task-create.component').then(m => m.TaskCreateComponent),
+      },
+      {
+        path: 'task/:id',
+        loadComponent: () =>
+          import('./pages/task-detail/task-detail.component').then(m => m.TaskDetailComponent),
+      },
+      {
+        path: 'today',
+        loadComponent: () =>
+          import('./pages/coming-soon/coming-soon.component').then(m => m.ComingSoonComponent),
+      },
+      {
+        path: 'inbox',
+        loadComponent: () =>
+          import('./pages/coming-soon/coming-soon.component').then(m => m.ComingSoonComponent),
+      },
+      {
+        path: 'projects',
+        loadComponent: () =>
+          import('./pages/coming-soon/coming-soon.component').then(m => m.ComingSoonComponent),
+      },
+      {
+        path: 'notifications',
+        loadComponent: () =>
+          import('./pages/coming-soon/coming-soon.component').then(m => m.ComingSoonComponent),
+      },
+      {
+        path: 'settings',
+        loadComponent: () =>
+          import('./pages/coming-soon/coming-soon.component').then(m => m.ComingSoonComponent),
+      },
+    ],
   },
   { path: '**', redirectTo: 'home' },
 ];

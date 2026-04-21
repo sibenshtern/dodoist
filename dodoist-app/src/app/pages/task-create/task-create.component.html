@@ -3,9 +3,9 @@
   <!-- ── Top bar ───────────────────────────────────────────────────────────── -->
   <header class="topbar">
     <nav class="breadcrumb">
-      <a class="breadcrumb__item" routerLink="/">Dodoist</a>
+      <a class="breadcrumb__item" routerLink="/home">Dodoist</a>
       <span class="breadcrumb__sep">›</span>
-      <a class="breadcrumb__item" routerLink="/">Projects</a>
+      <a class="breadcrumb__item" routerLink="/projects">Projects</a>
       <span class="breadcrumb__sep">›</span>
       <span class="breadcrumb__item breadcrumb__item--current">New task</span>
     </nav>
@@ -33,6 +33,9 @@
         </div>
 
         <div class="title-wrap">
+          <label class="field-label">
+            Title <span class="required-mark">*</span>
+          </label>
           <input
             class="title-input"
             [class.title-input--error]="titleInvalid"
@@ -48,11 +51,11 @@
 
         <div class="field-block">
           <label class="field-label">Description</label>
-          <textarea
-            class="desc-textarea"
-            formControlName="description"
+          <app-rich-editor
+            [value]="descriptionJson()"
+            (valueChange)="descriptionJson.set($event)"
             placeholder="Add a description, steps to reproduce, acceptance criteria…"
-          ></textarea>
+          ></app-rich-editor>
         </div>
 
       </main>
@@ -62,15 +65,19 @@
 
         <p class="sidebar__heading">Properties</p>
 
+        @if (serverError()) {
+          <p class="error-banner">{{ serverError() }}</p>
+        }
+
         <div class="prop-group">
 
           <div class="prop-row">
-            <span class="prop-name">Project</span>
+            <span class="prop-name">Project <span class="optional-mark">(optional)</span></span>
             <div class="prop-value">
               <select class="prop-select" formControlName="project_id">
-                <option value="">Select project</option>
-                @for (p of mockProjects; track p) {
-                  <option [value]="p">{{ p }}</option>
+                <option value="">Personal (default)</option>
+                @for (p of projects(); track p.id) {
+                  <option [value]="p.id">{{ p.name }}</option>
                 }
               </select>
             </div>
@@ -93,15 +100,18 @@
             </div>
           </div>
 
-          <div class="prop-row">
+          <div class="prop-row prop-row--top">
             <span class="prop-name">Assignee</span>
-            <div class="prop-value">
+            <div class="prop-value prop-value--col">
               <select class="prop-select" formControlName="assigned_to">
                 <option value="">Unassigned</option>
-                @for (u of mockUsers; track u) {
-                  <option [value]="u">{{ u }}</option>
+                @for (m of members(); track m.id) {
+                  <option [value]="m.id">{{ m.displayName }}</option>
                 }
               </select>
+              @if (!isAssignedToMe) {
+                <button type="button" class="assign-me-link" (click)="assignToMe()">Assign to me</button>
+              }
             </div>
           </div>
 
@@ -115,8 +125,8 @@
             <div class="prop-value">
               <select class="prop-select" formControlName="sprint_id">
                 <option value="">No sprint</option>
-                @for (s of mockSprints; track s) {
-                  <option [value]="s">{{ s }}</option>
+                @for (s of sprints(); track s.id) {
+                  <option [value]="s.id">{{ s.name }}</option>
                 }
               </select>
             </div>
@@ -165,13 +175,13 @@
           <div class="prop-row prop-row--top">
             <span class="prop-name">Labels</span>
             <div class="prop-chips prop-chips--wrap">
-              @for (l of mockLabels; track l) {
+              @for (l of labels(); track l.id) {
                 <button
                   type="button"
                   class="label-chip"
-                  [class.label-chip--active]="isLabelSelected(l)"
-                  (click)="toggleLabel(l)"
-                >{{ l }}</button>
+                  [class.label-chip--active]="isLabelSelected(l.id)"
+                  (click)="toggleLabel(l.id)"
+                >{{ l.name }}</button>
               }
             </div>
           </div>
@@ -203,11 +213,10 @@
   <!-- ── Footer actions ────────────────────────────────────────────────────── -->
   <footer class="footer">
     <div class="footer__inner">
-      <a class="btn btn--ghost" routerLink="/">Discard</a>
+      <a class="btn btn--ghost" routerLink="/home">Discard</a>
       <div class="footer__right">
-        <button class="btn btn--outline" type="button" routerLink="/">Save draft</button>
-        <button class="btn btn--primary" type="button" (click)="submit()">
-          Create task
+        <button class="btn btn--primary" type="button" (click)="submit()" [disabled]="isLoading()">
+          {{ isLoading() ? 'Creating…' : 'Create task' }}
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
             <path d="M2.5 7h9M8 3.5 11.5 7 8 10.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>

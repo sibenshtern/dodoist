@@ -1,0 +1,295 @@
+@if (isLoading()) {
+  <div class="loading-state">Loading task…</div>
+} @else if (task(); as t) {
+
+  <div class="detail-page">
+
+    <!-- ── Breadcrumb / back ──────────────────────────────────────────── -->
+    <div class="topbar">
+      <a class="back-link" routerLink="/tasks">← My Tasks</a>
+      <div class="topbar__actions">
+        <button class="btn btn--danger-ghost" (click)="deleteTask()">Delete</button>
+      </div>
+    </div>
+
+    <div class="detail-layout">
+
+      <!-- ── Left column: main content ─────────────────────────────── -->
+      <div class="main-col">
+
+        <!-- Title -->
+        <div class="title-wrap">
+          @if (isEditingTitle()) {
+            <input
+              class="title-input"
+              [value]="editedTitle()"
+              (input)="editedTitle.set($any($event.target).value)"
+              (keydown.enter)="saveTitle()"
+              (keydown.escape)="cancelEditTitle()"
+              (blur)="saveTitle()"
+              autofocus
+            />
+          } @else {
+            <h1 class="title" (click)="startEditTitle()">{{ t.title }}</h1>
+          }
+          @if (t.is_overdue && t.status !== 'done') {
+            <span class="overdue-badge">Overdue</span>
+          }
+        </div>
+
+        <!-- Meta row -->
+        <div class="meta-row">
+          <!-- Status dropdown -->
+          <div class="meta-field">
+            <span class="meta-label">Status</span>
+            <select
+              class="meta-select"
+              [value]="t.status"
+              (change)="changeStatus($any($event.target).value)"
+              [style.color]="taskStatus().color"
+              [style.background]="taskStatus().bg"
+            >
+              @for (s of statusOptions; track s) {
+                <option [value]="s" [selected]="s === t.status">{{ STATUS_META[s].label }}</option>
+              }
+            </select>
+          </div>
+
+          <!-- Priority dropdown -->
+          <div class="meta-field">
+            <span class="meta-label">Priority</span>
+            <select
+              class="meta-select"
+              [value]="t.priority"
+              (change)="changePriority($any($event.target).value)"
+              [style.color]="taskPriority().color"
+              [style.background]="taskPriority().bg"
+            >
+              @for (p of priorityOptions; track p) {
+                <option [value]="p" [selected]="p === t.priority">{{ PRIORITY_META[p].emoji }} {{ PRIORITY_META[p].label }}</option>
+              }
+            </select>
+          </div>
+
+          <!-- Assignee -->
+          <div class="meta-field">
+            <span class="meta-label">Assignee</span>
+            @if (t.assigned_to) {
+              <div class="assignee-chip">
+                <span class="assignee-avatar">{{ initials(t.assigned_to.display_name) }}</span>
+                <span class="assignee-name">{{ t.assigned_to.display_name }}</span>
+                @if (t.assigned_to.id !== currentUserId()) {
+                  <button class="assign-me-btn" (click)="assignToMe()" title="Reassign to me">→ me</button>
+                }
+              </div>
+            } @else {
+              <button class="assign-me-btn assign-me-btn--standalone" (click)="assignToMe()">Assign to me</button>
+            }
+          </div>
+
+          <!-- Due date -->
+          @if (t.due_date) {
+            <div class="meta-field">
+              <span class="meta-label">Due</span>
+              <span
+                class="due-value"
+                [class.due-value--overdue]="t.is_overdue && t.status !== 'done'"
+              >{{ formatDate(t.due_date) }}</span>
+            </div>
+          }
+
+          <!-- Story points -->
+          @if (t.story_points !== null) {
+            <div class="meta-field">
+              <span class="meta-label">Points</span>
+              <span class="meta-value">{{ t.story_points }} pts</span>
+            </div>
+          }
+        </div>
+
+        <!-- Labels -->
+        @if (t.labels?.length) {
+          <div class="labels-row">
+            @for (label of t.labels; track label.id) {
+              <span class="label-chip" [style.color]="label.color">{{ label.name }}</span>
+            }
+          </div>
+        }
+
+        <!-- Description -->
+        <section class="section">
+          <div class="section__header">
+            <h3 class="section__title">Description</h3>
+            @if (descriptionDirty()) {
+              <div class="desc-actions">
+                <button class="btn btn--primary btn--sm" [disabled]="isSavingDesc()"
+                  (click)="saveDescription()">
+                  {{ isSavingDesc() ? 'Saving…' : 'Save' }}
+                </button>
+                <button class="btn btn--ghost btn--sm" (click)="discardDescription()">Discard</button>
+              </div>
+            }
+          </div>
+          <app-rich-editor
+            [value]="descriptionDraft()"
+            (valueChange)="onDescriptionChange($event)"
+            placeholder="Add a description, steps to reproduce, acceptance criteria…"
+          ></app-rich-editor>
+        </section>
+
+        <!-- Tabs -->
+        <div class="tabs">
+          <button
+            class="tab-btn"
+            [class.tab-btn--active]="activeTab() === 'comments'"
+            (click)="setTab('comments')"
+          >Comments ({{ comments().length }})</button>
+          <button
+            class="tab-btn"
+            [class.tab-btn--active]="activeTab() === 'time-logs'"
+            (click)="setTab('time-logs')"
+          >Time Logs</button>
+          <button
+            class="tab-btn"
+            [class.tab-btn--active]="activeTab() === 'activity'"
+            (click)="setTab('activity')"
+          >Activity</button>
+        </div>
+
+        <!-- Tab: Comments -->
+        @if (activeTab() === 'comments') {
+          <div class="tab-panel">
+            <!-- New comment -->
+            <form [formGroup]="commentForm" (ngSubmit)="submitComment()" class="comment-form">
+              <textarea
+                formControlName="body"
+                class="comment-input"
+                placeholder="Write a comment…"
+                rows="3"
+              ></textarea>
+              <div class="comment-form__footer">
+                <button class="btn btn--primary" type="submit" [disabled]="!commentForm.controls.body.value.trim()">
+                  Post
+                </button>
+              </div>
+            </form>
+
+            <!-- Comment list -->
+            <div class="comment-list">
+              @for (comment of comments(); track comment.id) {
+                <div class="comment">
+                  <div class="comment__avatar">{{ initials(comment.author.display_name) }}</div>
+                  <div class="comment__body">
+                    <div class="comment__header">
+                      <strong class="comment__author">{{ comment.author.display_name }}</strong>
+                      <span class="comment__time">{{ comment.created_at | date:'MMM d, h:mm a' }}</span>
+                      @if (comment.is_edited) { <span class="comment__edited">(edited)</span> }
+                    </div>
+                    <p class="comment__text">{{ commentText(comment) }}</p>
+                    <div class="comment__actions">
+                      <button class="react-btn" (click)="react(comment.id, '👍')">👍</button>
+                      <button class="react-btn" (click)="react(comment.id, '👎')">👎</button>
+                      @if (isOwnComment(comment)) {
+                        <button class="action-link action-link--danger" (click)="deleteComment(comment.id)">Delete</button>
+                      }
+                    </div>
+                  </div>
+                </div>
+              }
+              @if (comments().length === 0) {
+                <p class="empty-hint">No comments yet.</p>
+              }
+            </div>
+          </div>
+        }
+
+        <!-- Tab: Time Logs -->
+        @if (activeTab() === 'time-logs') {
+          <div class="tab-panel">
+            <div class="timelog-total">Total logged: <strong>{{ minutesToHours(totalMinutes()) }}</strong></div>
+
+            <form [formGroup]="timeLogForm" (ngSubmit)="submitTimeLog()" class="timelog-form">
+              <div class="form-row">
+                <label class="form-label">Minutes
+                  <input class="form-input" type="number" formControlName="logged_minutes" min="1" max="1440" />
+                </label>
+                <label class="form-label">Date
+                  <input class="form-input" type="date" formControlName="logged_date" />
+                </label>
+                <label class="form-label" style="flex:2">Description
+                  <input class="form-input" type="text" formControlName="description" placeholder="Optional" />
+                </label>
+              </div>
+              <button class="btn btn--primary" type="submit">Log Time</button>
+            </form>
+
+            <div class="timelog-list">
+              @for (log of timeLogs(); track log.id) {
+                <div class="timelog-row">
+                  <div class="timelog-avatar">{{ initials(log.user.display_name) }}</div>
+                  <div class="timelog-content">
+                    <span class="timelog-user">{{ log.user.display_name }}</span>
+                    <span class="timelog-mins">{{ minutesToHours(log.logged_minutes) }}</span>
+                    <span class="timelog-date">{{ log.logged_date }}</span>
+                    @if (log.description) { <span class="timelog-desc">{{ log.description }}</span> }
+                  </div>
+                  <button class="action-link action-link--danger" (click)="deleteTimeLog(log.id, log.logged_minutes)">✕</button>
+                </div>
+              }
+              @if (timeLogs().length === 0) {
+                <p class="empty-hint">No time logged yet.</p>
+              }
+            </div>
+          </div>
+        }
+
+        <!-- Tab: Activity -->
+        @if (activeTab() === 'activity') {
+          <div class="tab-panel">
+            <div class="activity-feed">
+              @for (entry of activity(); track entry.id) {
+                <div class="activity-entry">
+                  <div class="activity-avatar">{{ initials(entry.actor.display_name) }}</div>
+                  <div class="activity-content">
+                    <span class="activity-actor">{{ entry.actor.display_name }}</span>
+                    <span class="activity-action">{{ entry.action }}</span>
+                    <span class="activity-time">{{ entry.created_at | date:'MMM d, h:mm a' }}</span>
+                  </div>
+                </div>
+              }
+              @if (activity().length === 0) {
+                <p class="empty-hint">No activity yet.</p>
+              }
+            </div>
+          </div>
+        }
+
+      </div>
+
+      <!-- ── Right sidebar: task info ───────────────────────────────── -->
+      <aside class="info-sidebar">
+        <section class="info-section">
+          <h4 class="info-section__title">Details</h4>
+          <dl class="info-list">
+            <dt>Type</dt>
+            <dd>{{ t.type }}</dd>
+            <dt>Created by</dt>
+            <dd>{{ t.created_by?.display_name }}</dd>
+            <dt>Created</dt>
+            <dd>{{ formatDate(t.created_at) }}</dd>
+            @if (t.completed_at) {
+              <dt>Completed</dt>
+              <dd>{{ formatDate(t.completed_at) }}</dd>
+            }
+            @if (t.start_date) {
+              <dt>Start date</dt>
+              <dd>{{ formatDate(t.start_date) }}</dd>
+            }
+          </dl>
+        </section>
+      </aside>
+
+    </div>
+  </div>
+
+}

@@ -37,7 +37,10 @@
     "@taiga-ui/icons": "^4.73.0",
     "@taiga-ui/kit": "^4.73.0",
     "@taiga-ui/polymorpheus": "^4.9.0",
+    "@tiptap/core": "^3.22.4",
+    "@tiptap/starter-kit": "^3.22.4",
     "libphonenumber-js": "^1.12.38",
+    "ngx-tiptap": "^14.0.1",
     "rxjs": "~7.8.0",
     "tslib": "^2.3.0"
   },

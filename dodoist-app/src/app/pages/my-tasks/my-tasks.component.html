@@ -1,0 +1,95 @@
+<div class="board-wrap">
+
+  <!-- Top bar -->
+  <header class="topbar">
+    <div class="topbar__left">
+      <h1 class="topbar__title">My Tasks — Board</h1>
+    </div>
+    <div class="topbar__right">
+      <button class="btn btn--outline">Filter</button>
+      <button class="btn btn--primary" (click)="navigateToNewTask()">+ Task</button>
+    </div>
+  </header>
+
+  @if (isLoading()) {
+    <div class="loading">Loading tasks…</div>
+  } @else if (loadError()) {
+    <div class="load-error">
+      <p>Failed to load tasks. Please try again.</p>
+      <button class="btn btn--outline" (click)="load()">Retry</button>
+    </div>
+  } @else {
+
+    <!-- Kanban board -->
+    <div class="board">
+      @for (col of COLUMNS; track col.key) {
+        <div
+          class="column"
+          (dragover)="onDragOver($event)"
+          (drop)="onDrop(col.key)"
+        >
+          <!-- Column header -->
+          <div class="column__header">
+            <span class="column__dot" [style.background]="col.color"></span>
+            <span class="column__name">{{ col.label }}</span>
+            <span class="column__count">{{ tasksByStatus()[col.key].length }}</span>
+          </div>
+
+          <!-- Task cards -->
+          <div class="column__tasks">
+            @for (task of tasksByStatus()[col.key]; track task.id) {
+              <div
+                class="task-card"
+                [class.task-card--overdue]="task.is_overdue && task.status !== 'done'"
+                [class.task-card--done]="task.status === 'done'"
+                draggable="true"
+                (dragstart)="onDragStart(task.id)"
+                (dragend)="onDragEnd()"
+                (click)="onCardClick(task.id)"
+              >
+                <p class="task-card__title">{{ task.title }}</p>
+
+                <div class="task-card__meta">
+                  @if (task.labels[0]) {
+                    <span
+                      class="label-badge"
+                      [style.color]="task.labels[0].color"
+                      [style.background]="labelBg(task.labels[0].color)"
+                    >{{ task.labels[0].name }}</span>
+                  }
+                  @if (task.story_points !== null) {
+                    <span class="pts-badge">{{ task.story_points }} pts</span>
+                  }
+                </div>
+
+                <div class="task-card__footer">
+                  <span
+                    class="task-card__due"
+                    [class.task-card__due--overdue]="task.is_overdue && task.status !== 'done'"
+                  >{{ formatDue(task.due_date) }}</span>
+
+                  @if (task.assigned_to) {
+                    <span class="assignee-avatar">{{ assigneeInitial(task) }}</span>
+                  }
+
+                  @if (task.priority !== 'none') {
+                    <span
+                      class="priority-dot"
+                      [style.background]="priorityColor(task.priority)"
+                    ></span>
+                  }
+                </div>
+              </div>
+            }
+          </div>
+
+          <!-- Add task button -->
+          <button class="column__add" (click)="navigateToNewTask()">
+            ＋ Add task
+          </button>
+        </div>
+      }
+    </div>
+
+  }
+</div>

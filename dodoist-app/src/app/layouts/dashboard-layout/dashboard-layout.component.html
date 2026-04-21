@@ -1,0 +1,68 @@
+<div class="shell">
+
+  <!-- ── Sidebar ──────────────────────────────────────────────────────────── -->
+  <aside class="sidebar">
+
+    <div class="sidebar__brand">
+      <div class="brand-mark">D</div>
+      <span class="brand-name">Dodoist</span>
+    </div>
+
+    <button class="workspace-switcher">
+      <div class="workspace-icon">{{ workspaceInitial() }}</div>
+      <div class="workspace-info">
+        <span class="workspace-name">{{ workspaceName() }}</span>
+        <span class="workspace-plan">{{ workspacePlan() }}</span>
+      </div>
+      <tui-icon icon="@tui.chevron-down" class="workspace-chevron" />
+    </button>
+
+    <nav class="nav">
+      @for (item of navItems; track item.path) {
+        <a
+          class="nav__item"
+          [routerLink]="item.path"
+          routerLinkActive="nav__item--active"
+        >
+          <tui-icon [icon]="item.icon" class="nav__icon" />
+          {{ item.label }}
+        </a>
+      }
+    </nav>
+
+    <div class="sidebar-section">
+      <span class="sidebar-section__label">Projects</span>
+      @for (project of projects(); track project.id) {
+        <button class="project-nav-item">
+          <span class="project-nav-dot" [style.background]="project.color"></span>
+          {{ project.name }}
+        </button>
+      }
+    </div>
+
+    <div class="sidebar__footer">
+      <button class="nav__item" [routerLink]="'/notifications'">
+        <tui-icon icon="@tui.bell" class="nav__icon" />
+        Notifications
+      </button>
+      <button class="nav__item" [routerLink]="'/settings'">
+        <tui-icon icon="@tui.settings" class="nav__icon" />
+        Settings
+      </button>
+      <div class="user-row">
+        <div class="user-avatar">{{ currentUserInitials() }}</div>
+        <span class="user-name">{{ currentUserName() }}</span>
+        <button class="logout-btn" (click)="logout()" title="Sign out">
+          <tui-icon icon="@tui.log-out" />
+        </button>
+      </div>
+    </div>
+
+  </aside>
+
+  <!-- ── Page content ─────────────────────────────────────────────────────── -->
+  <main class="page-content">
+    <router-outlet />
+  </main>
+
+</div>
