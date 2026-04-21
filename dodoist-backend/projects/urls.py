@@ -59,5 +59,5 @@ urlpatterns = [
     path("api/projects/<uuid:pk>/boards/", ProjectBoardListView.as_view(), name="project-board-list"),
     path("api/boards/<uuid:pk>/", BoardDetailView.as_view(), name="board-detail"),
     path("api/boards/<uuid:pk>/columns/", BoardColumnListView.as_view(), name="board-column-list"),
-    path("api/boards/<uuid:pk>/columns/<uuid:column_pk>/", BoardColumnDetailView.as_view(), name="board-column-detail"),
+    path("api/boards/<uuid:board_pk>/columns/<uuid:pk>/", BoardColumnDetailView.as_view(), name="board-column-detail"),
 ]
