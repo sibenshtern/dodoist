@@ -199,4 +199,8 @@ export class TaskService {
   getProjectSprints(projectId: string): Observable<any[]> {
     return this.http.get<any[]>(`${environment.apiBase}/api/projects/${projectId}/sprints/?status=active,planned`);
   }
+
+  getProjectTasks(projectId: string): Observable<Task[]> {
+    return this.http.get<Task[]>(`${environment.apiBase}/api/projects/${projectId}/tasks/`);
+  }
 }

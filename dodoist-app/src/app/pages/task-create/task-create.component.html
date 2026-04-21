@@ -188,8 +188,33 @@
 
           <div class="prop-row">
             <span class="prop-name">Parent task</span>
-            <div class="prop-value">
-              <input class="prop-input" type="text" formControlName="parent_task_id" placeholder="Search tasks…" />
+            <div class="prop-value prop-value--typeahead">
+              @if (parentTaskSelected()) {
+                <div class="typeahead-selected">
+                  <span class="typeahead-selected__label">{{ parentTaskSelected()!.title }}</span>
+                  <button type="button" class="typeahead-selected__clear" (click)="clearParentTask()">✕</button>
+                </div>
+              } @else {
+                <input
+                  class="prop-input"
+                  type="text"
+                  [value]="parentTaskSearch()"
+                  (input)="onParentSearchInput($event)"
+                  placeholder="Search tasks…"
+                  autocomplete="off"
+                  [disabled]="!form.controls.project_id.value"
+                />
+                @if (showParentDropdown() && parentTaskResults().length > 0) {
+                  <ul class="typeahead-dropdown">
+                    @for (task of parentTaskResults(); track task.id) {
+                      <li class="typeahead-option" (mousedown)="selectParentTask(task)">
+                        <span class="typeahead-option__title">{{ task.title }}</span>
+                        <span class="typeahead-option__meta">{{ task.status }}</span>
+                      </li>
+                    }
+                  </ul>
+                }
+              }
             </div>
           </div>
 

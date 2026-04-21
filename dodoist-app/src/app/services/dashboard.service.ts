@@ -38,6 +38,7 @@ export interface ActivityItem {
   action: string;
   target: string;
   timeAgo: string;
+  taskId?: string;
 }
 
 export interface SprintProgress {
@@ -82,6 +83,8 @@ interface ApiActivityItem {
   action: string;
   target: string;
   time_ago: string;
+  entity_type: string;
+  entity_id: string;
 }
 
 interface ApiSprint {
@@ -156,6 +159,7 @@ export class DashboardService {
           action: a.action,
           target: a.target,
           timeAgo: a.time_ago,
+          taskId: a.entity_type === 'task' ? a.entity_id : undefined,
         })),
       ),
     );

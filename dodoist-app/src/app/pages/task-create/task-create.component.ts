@@ -2,7 +2,7 @@ import { Component, inject, signal, OnInit } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { RouterLink, Router } from '@angular/router';
 import { forkJoin, of, switchMap } from 'rxjs';
-import { TaskService, TaskCreatePayload } from '../../services/task.service';
+import { TaskService, TaskCreatePayload, Task } from '../../services/task.service';
 import { UserService } from '../../services/user.service';
 import { RichEditorComponent } from '../../components/rich-editor/rich-editor.component';
 
@@ -98,6 +98,12 @@ export class TaskCreateComponent implements OnInit {
   readonly selectedLabelIds = signal<string[]>([]);
   readonly descriptionJson = signal<unknown>(null);
 
+  readonly parentTaskSearch = signal('');
+  readonly parentTaskResults = signal<Task[]>([]);
+  readonly parentTaskSelected = signal<Task | null>(null);
+  readonly showParentDropdown = signal(false);
+  private allProjectTasks: Task[] = [];
+
   get currentType(): TypeMeta {
     return this.types.find((t) => t.value === this.form.controls.type.value)!;
   }
@@ -139,6 +145,36 @@ export class TaskCreateComponent implements OnInit {
     return this.selectedLabelIds().includes(labelId);
   }
 
+  onParentSearchInput(event: Event): void {
+    const query = (event.target as HTMLInputElement).value;
+    this.parentTaskSearch.set(query);
+    if (!query.trim()) {
+      this.parentTaskResults.set([]);
+      this.showParentDropdown.set(false);
+      return;
+    }
+    const lower = query.toLowerCase();
+    this.parentTaskResults.set(
+      this.allProjectTasks.filter((t) => t.title.toLowerCase().includes(lower)).slice(0, 8),
+    );
+    this.showParentDropdown.set(true);
+  }
+
+  selectParentTask(task: Task): void {
+    this.parentTaskSelected.set(task);
+    this.form.controls.parent_task_id.setValue(task.id);
+    this.parentTaskSearch.set(task.title);
+    this.parentTaskResults.set([]);
+    this.showParentDropdown.set(false);
+  }
+
+  clearParentTask(): void {
+    this.parentTaskSelected.set(null);
+    this.form.controls.parent_task_id.setValue('');
+    this.parentTaskSearch.set('');
+    this.allProjectTasks = [];
+  }
+
   ngOnInit(): void {
     this.userService.loadWorkspaces().subscribe((workspaces) => {
       const ws = workspaces.find((w) => w.is_personal) ?? workspaces[0];
@@ -160,6 +196,7 @@ export class TaskCreateComponent implements OnInit {
     this.form.controls.project_id.valueChanges.subscribe((projectId) => {
       this.members.set([]);
       this.sprints.set([]);
+      this.clearParentTask();
       if (!projectId) return;
       this.taskService
         .getProjectMembers(projectId)
@@ -169,6 +206,9 @@ export class TaskCreateComponent implements OnInit {
       this.taskService
         .getProjectSprints(projectId)
         .subscribe((ss) => this.sprints.set(ss.map((s) => ({ id: s.id, name: s.name }))));
+      this.taskService
+        .getProjectTasks(projectId)
+        .subscribe((tasks) => { this.allProjectTasks = tasks; });
     });
   }
 

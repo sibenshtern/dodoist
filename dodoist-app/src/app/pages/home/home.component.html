@@ -178,7 +178,11 @@
                 <p class="activity-text">
                   <strong>{{ item.actorName }}</strong>
                   {{ item.action }}
-                  <span class="activity-target">{{ item.target }}</span>
+                  @if (item.taskId) {
+                    <a class="activity-target" [routerLink]="['/task', item.taskId]">{{ item.target }}</a>
+                  } @else {
+                    <span class="activity-target">{{ item.target }}</span>
+                  }
                 </p>
                 <span class="activity-time">{{ item.timeAgo }}</span>
               </div>

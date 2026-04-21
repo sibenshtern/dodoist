@@ -479,6 +479,13 @@ $font-b: 'Manrope', sans-serif;
 .activity-target {
   color: $blue;
   font-weight: 500;
+
+  &[href] {
+    text-decoration: none;
+    cursor: pointer;
+
+    &:hover { text-decoration: underline; }
+  }
 }
 
 .activity-time {
