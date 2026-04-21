@@ -26,27 +26,27 @@ model {
   system taskTracker 'Task Tracker' {
     description 'Hybrid personal/work task tracker with project management, agile boards, sprints, and analytics.'
 
-    container angularSpa 'Angular SPA' {
+    system angularSpa 'Angular SPA' {
       description 'Browser client. Implements all UI and communicates with the backend via REST API.'
       technology 'Angular, TypeScript'
     }
 
-    container djangoApi 'Django REST API' {
+    system djangoApi 'Django REST API' {
       description 'Stateless API server. Handles business logic, permissions, and JWT authentication.'
       technology 'Django, Django REST Framework'
     }
 
-    container postgresDb 'PostgreSQL' {
+    system postgresDb 'PostgreSQL' {
       description 'Primary relational data store.'
       technology 'PostgreSQL 16'
     }
+    
+    angularSpa -> djangoApi 'HTTPS REST API (Bearer JWT)' #restApi
+    djangoApi -> postgresDb 'Reads / writes data'
   }
 
   endUser     -> taskTracker.angularSpa 'Uses via browser'
   systemAdmin -> taskTracker.angularSpa 'Administers via browser'
-
-  taskTracker.angularSpa -> taskTracker.djangoApi 'HTTPS REST API (Bearer JWT)' #restApi
-  taskTracker.djangoApi  -> taskTracker.postgresDb 'Reads / writes data'
 }
 
 views {
@@ -71,7 +71,13 @@ views {
     include
       endUser,
       systemAdmin,
-      taskTracker.*
+      taskTracker.angularSpa,
+      taskTracker.djangoApi,
+      taskTracker.postgresDb,
+      endUser -> taskTracker.angularSpa,
+      systemAdmin -> taskTracker.angularSpa,
+      taskTracker.angularSpa -> taskTracker.djangoApi,
+      taskTracker.djangoApi -> taskTracker.postgresDb
 
     style endUser, systemAdmin {
       shape person
