@@ -1134,3 +1134,61 @@ class TestDashboardStatsView:
     def test_unauthenticated_returns_401(self, api_client):
         response = api_client.get("/api/dashboard/stats/")
         assert response.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# WIP limit enforcement
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+class TestWipLimit:
+    def _make_board_with_column(self, project, user, wip_limit):
+        from projects.models import Board, BoardColumn, BoardType, TaskStatus
+        board = Board.objects.create(
+            project=project, name="Main", type=BoardType.KANBAN,
+            is_default=True, created_by=user,
+        )
+        column = BoardColumn.objects.create(
+            board=board, name="In Progress",
+            status_mapping=TaskStatus.IN_PROGRESS,
+            position=1, wip_limit=wip_limit,
+        )
+        return board, column
+
+    def test_move_to_column_respects_wip_limit(self, project, user):
+        _, column = self._make_board_with_column(project, user, wip_limit=2)
+        t1 = TaskService.create_task(project=project, creator=user, title="T1")
+        t2 = TaskService.create_task(project=project, creator=user, title="T2")
+        t3 = TaskService.create_task(project=project, creator=user, title="T3")
+
+        TaskService.move_to_column(t1, column, user)
+        TaskService.move_to_column(t2, column, user)
+
+        with pytest.raises(ValueError, match="WIP limit"):
+            TaskService.move_to_column(t3, column, user)
+
+    def test_move_to_column_allows_within_limit(self, project, user):
+        _, column = self._make_board_with_column(project, user, wip_limit=3)
+        tasks = [TaskService.create_task(project=project, creator=user, title=f"T{i}") for i in range(3)]
+        for t in tasks:
+            TaskService.move_to_column(t, column, user)
+        from projects.models import TaskStatus as TS
+        assert all(t.status == TS.IN_PROGRESS for t in tasks)
+
+    def test_move_to_column_no_limit(self, project, user):
+        _, column = self._make_board_with_column(project, user, wip_limit=None)
+        tasks = [TaskService.create_task(project=project, creator=user, title=f"T{i}") for i in range(10)]
+        for t in tasks:
+            TaskService.move_to_column(t, column, user)
+
+    def test_move_column_endpoint_returns_409_when_wip_exceeded(self, project, user):
+        from rest_framework.test import APIClient
+        _, column = self._make_board_with_column(project, user, wip_limit=1)
+        t1 = TaskService.create_task(project=project, creator=user, title="T1")
+        t2 = TaskService.create_task(project=project, creator=user, title="T2")
+        TaskService.move_to_column(t1, column, user)
+
+        client = APIClient()
+        client.force_authenticate(user=user)
+        resp = client.post(f"/api/tasks/{t2.pk}/move-column/", {"column_id": str(column.pk)}, format="json")
+        assert resp.status_code == 409

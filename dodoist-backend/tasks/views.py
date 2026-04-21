@@ -909,7 +909,9 @@ class TaskMoveColumnView(APIView):
         try:
             task = TaskService.move_to_column(task, column, request.user)
         except ValueError as exc:
-            return Response({"detail": str(exc)}, status=400)
+            msg = str(exc)
+            status_code = 409 if "WIP limit" in msg else 400
+            return Response({"detail": msg}, status=status_code)
         return Response(TaskSerializer(task).data)
 
 

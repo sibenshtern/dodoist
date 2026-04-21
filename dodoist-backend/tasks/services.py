@@ -162,6 +162,14 @@ class TaskService:
     def move_to_column(task: Task, column: BoardColumn, actor: User) -> Task:
         if task.is_deleted():
             raise ValueError("Cannot move a deleted task.")
+        if column.wip_limit is not None:
+            current_count = Task.objects.filter(
+                board_column=column, deleted_at__isnull=True
+            ).exclude(pk=task.pk).count()
+            if current_count >= column.wip_limit:
+                raise ValueError(
+                    f"WIP limit of {column.wip_limit} reached for column '{column.name}'."
+                )
         task.board_column = column
         task.status = column.status_mapping
         task.save(update_fields=["board_column", "status", "updated_at"])
