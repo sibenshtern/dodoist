@@ -76,22 +76,35 @@ const config: Config = {
       style: 'dark',
       links: [
         {
-          title: 'Documentation',
+          title: 'Документация',
           items: [
-            { label: 'Overview',        to: '/docs/intro' },
-            { label: 'Technologies',    to: '/docs/technologies' },
-            { label: 'Architecture',    to: '/docs/architecture' },
-            { label: 'Database schema', to: '/docs/database' },
-            { label: 'API reference',   to: '/docs/api-documentation' },
-            { label: 'Deployment',      to: '/docs/deployment' },
+            { label: 'Обзор',           to: '/docs/intro' },
+            { label: 'Технологии',      to: '/docs/technologies' },
+            { label: 'Архитектура',     to: '/docs/architecture' },
+            { label: 'База данных',     to: '/docs/database' },
+            { label: 'Деплой',          to: '/docs/deployment' },
           ],
         },
         {
-          title: 'ADR',
+          title: 'API',
           items: [
-            { label: 'User',    to: '/docs/ADR/user' },
-            { label: 'Project', to: '/docs/ADR/project' },
-            { label: 'Task',    to: '/docs/ADR/task' },
+            { label: 'Проекты',  to: '/docs/ADR/projects' },
+            { label: 'Задачи',   to: '/docs/ADR/tasks' },
+          ],
+        },
+        {
+          title: 'Архитектурные решения',
+          items: [
+            { label: 'ADR-001: WIP-лимит',      to: '/docs/ADR/adr-001-wip-limit-enforcement' },
+            { label: 'ADR-002: Django Admin',   to: '/docs/ADR/adr-002-django-admin' },
+            { label: 'ADR-003: Typeahead',      to: '/docs/ADR/adr-003-parent-task-typeahead' },
+            { label: 'ADR-004: Уведомления',    to: '/docs/ADR/adr-004-notification-pipeline' },
+          ],
+        },
+        {
+          title: 'История изменений',
+          items: [
+            { label: 'Phase 0 — Стабилизация', to: '/docs/changelog/phase-0' },
           ],
         },
       ],
