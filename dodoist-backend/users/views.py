@@ -351,7 +351,13 @@ class NotificationListView(APIView):
     """
     def get(self, request):
         from users.models import Notification
-        qs = Notification.objects.filter(recipient=request.user).order_by("-created_at")
+        from users.serializers import NotificationSerializer
+        qs = (
+            Notification.objects
+            .filter(recipient=request.user)
+            .select_related("actor")
+            .order_by("-created_at")
+        )
         is_read = request.query_params.get("is_read")
         if is_read is not None:
             qs = qs.filter(is_read=is_read.lower() == "true")
@@ -359,20 +365,8 @@ class NotificationListView(APIView):
         if ntype:
             qs = qs.filter(type=ntype)
         limit = min(int(request.query_params.get("limit", 50)), 100)
-        data = [
-            {
-                "id": str(n.id),
-                "type": n.type,
-                "message": n.message,
-                "task_id": str(n.task_id) if n.task_id else None,
-                "project_id": str(n.project_id) if n.project_id else None,
-                "is_read": n.is_read,
-                "created_at": n.created_at.isoformat(),
-                "read_at": n.read_at.isoformat() if n.read_at else None,
-            }
-            for n in qs[:limit]
-        ]
-        return Response(data)
+        serializer = NotificationSerializer(qs[:limit], many=True)
+        return Response(serializer.data)
 
 
 class NotificationDetailView(APIView):
@@ -386,13 +380,14 @@ class NotificationDetailView(APIView):
 
     def patch(self, request, pk):
         from django.utils import timezone as tz
+        from users.serializers import NotificationSerializer
         n = self._get_notif(request, pk)
         is_read = request.data.get("is_read")
         if is_read is True or is_read == "true":
             n.is_read = True
             n.read_at = tz.now()
             n.save(update_fields=["is_read", "read_at"])
-        return Response({"id": str(n.id), "is_read": n.is_read})
+        return Response(NotificationSerializer(n).data)
 
     def delete(self, request, pk):
         n = self._get_notif(request, pk)

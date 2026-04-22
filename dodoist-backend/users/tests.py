@@ -4,8 +4,8 @@ import secrets
 import pytest
 from django.utils import timezone
 
-from users.models import GlobalRole, User, UserPreferences, UserSession
-from users.services import UserService
+from users.models import GlobalRole, Notification, NotificationType, User, UserPreferences, UserSession
+from users.services import NotificationService, UserService
 
 
 @pytest.fixture
@@ -259,3 +259,208 @@ class TestMeView:
         client = APIClient()
         response = client.get("/api/users/me")
         assert response.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# NotificationService
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def two_users(db):
+    alice = UserService.register(email="notif_alice@example.com", password="pass", display_name="Alice")
+    bob = UserService.register(email="notif_bob@example.com", password="pass", display_name="Bob")
+    return alice, bob
+
+
+@pytest.mark.django_db
+class TestNotificationService:
+    def test_create_notification(self, two_users):
+        alice, bob = two_users
+        notif = NotificationService.create(
+            recipient=bob,
+            notification_type=NotificationType.ASSIGNED,
+            message="Alice assigned you to a task",
+            actor=alice,
+        )
+        assert notif.pk is not None
+        assert notif.recipient_id == bob.pk
+        assert notif.actor_id == alice.pk
+        assert notif.type == NotificationType.ASSIGNED
+        assert notif.is_read is False
+
+    def test_create_notification_persists(self, two_users):
+        alice, bob = two_users
+        NotificationService.create(
+            recipient=bob,
+            notification_type=NotificationType.COMMENTED,
+            message="Alice commented on a task",
+            actor=alice,
+        )
+        assert Notification.objects.filter(recipient=bob, type=NotificationType.COMMENTED).count() == 1
+
+    def test_notify_watchers_excludes_actor(self, two_users):
+        from projects.services import ProjectService, WorkspaceService
+        from tasks.services import TaskService
+
+        alice, bob = two_users
+        ws = alice.owned_workspaces.filter(is_personal=True).first()
+        WorkspaceService.add_member(ws, bob)
+        project = ProjectService.create_project(ws, alice, "P", "P1")
+        ProjectService.add_member(project, bob, "DEV", added_by=alice)
+        task = TaskService.create_task(project, alice, "Test task", assigned_to=bob)
+
+        NotificationService.notify_watchers(
+            task=task,
+            notification_type=NotificationType.STATUS_CHANGED,
+            message="Status changed",
+            actor=alice,
+        )
+        # bob (assigned) gets notification; alice (actor) is excluded
+        assert Notification.objects.filter(recipient=bob, type=NotificationType.STATUS_CHANGED).count() == 1
+        assert Notification.objects.filter(recipient=alice, type=NotificationType.STATUS_CHANGED).count() == 0
+
+    def test_assign_user_creates_notification(self, two_users):
+        from projects.services import ProjectService, WorkspaceService
+        from tasks.services import TaskService
+
+        alice, bob = two_users
+        ws = alice.owned_workspaces.filter(is_personal=True).first()
+        WorkspaceService.add_member(ws, bob)
+        project = ProjectService.create_project(ws, alice, "P", "P2")
+        ProjectService.add_member(project, bob, "DEV", added_by=alice)
+        task = TaskService.create_task(project, alice, "Assign test")
+        TaskService.assign_user(task, bob, assigned_by=alice)
+
+        assert Notification.objects.filter(recipient=bob, type=NotificationType.ASSIGNED).count() == 1
+
+    def test_comment_creates_commented_notification(self, two_users):
+        from projects.services import ProjectService, WorkspaceService
+        from tasks.services import CommentService, TaskService
+
+        alice, bob = two_users
+        ws = alice.owned_workspaces.filter(is_personal=True).first()
+        WorkspaceService.add_member(ws, bob)
+        project = ProjectService.create_project(ws, alice, "P", "P3")
+        ProjectService.add_member(project, bob, "DEV", added_by=alice)
+        task = TaskService.create_task(project, alice, "Comment test", assigned_to=bob)
+        CommentService.add_comment(task, alice, body={"type": "doc", "content": []})
+
+        assert Notification.objects.filter(recipient=bob, type=NotificationType.COMMENTED).count() == 1
+
+    def test_create_for_mentions_parses_prosemirror(self, two_users):
+        from projects.services import ProjectService, WorkspaceService
+        from tasks.services import TaskService
+
+        alice, bob = two_users
+        ws = alice.owned_workspaces.filter(is_personal=True).first()
+        WorkspaceService.add_member(ws, bob)
+        project = ProjectService.create_project(ws, alice, "P", "P4")
+        ProjectService.add_member(project, bob, "DEV", added_by=alice)
+        task = TaskService.create_task(project, alice, "Mention test")
+
+        body = {
+            "type": "doc",
+            "content": [
+                {
+                    "type": "paragraph",
+                    "content": [
+                        {"type": "mention", "attrs": {"id": str(bob.pk), "label": "Bob"}}
+                    ],
+                }
+            ],
+        }
+        NotificationService.create_for_mentions(body, actor=alice, task=task)
+
+        assert Notification.objects.filter(recipient=bob, type=NotificationType.MENTIONED).count() == 1
+
+    def test_add_member_creates_invited_notification(self, two_users):
+        from projects.services import ProjectService, WorkspaceService
+
+        alice, bob = two_users
+        ws = alice.owned_workspaces.filter(is_personal=True).first()
+        WorkspaceService.add_member(ws, bob)
+        project = ProjectService.create_project(ws, alice, "P", "P5")
+        ProjectService.add_member(project, bob, "DEV", added_by=alice)
+
+        assert Notification.objects.filter(recipient=bob, type=NotificationType.INVITED).count() == 1
+
+
+# ---------------------------------------------------------------------------
+# View: Notifications API
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+class TestNotificationViews:
+    def _auth_client(self, user):
+        from datetime import timedelta
+        from rest_framework.test import APIClient
+        raw = secrets.token_hex(32)
+        token_hash = hashlib.sha256(raw.encode()).hexdigest()
+        raw_refresh = secrets.token_hex(32)
+        refresh_hash = hashlib.sha256(raw_refresh.encode()).hexdigest()
+        UserService.create_session(
+            user=user,
+            token_hash=token_hash,
+            expires_at=timezone.now() + timedelta(minutes=15),
+            refresh_token_hash=refresh_hash,
+            refresh_expires_at=timezone.now() + timedelta(days=7),
+        )
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {raw}")
+        return client
+
+    def test_list_notifications(self, two_users):
+        alice, bob = two_users
+        NotificationService.create(
+            recipient=alice, notification_type=NotificationType.ASSIGNED, message="msg", actor=bob
+        )
+        client = self._auth_client(alice)
+        resp = client.get("/api/notifications/")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 1
+        assert data[0]["type"] == NotificationType.ASSIGNED
+        assert data[0]["actor"]["display_name"] == "Bob"
+
+    def test_filter_unread(self, two_users):
+        alice, bob = two_users
+        n = NotificationService.create(
+            recipient=alice, notification_type=NotificationType.COMMENTED, message="m", actor=bob
+        )
+        Notification.objects.filter(pk=n.pk).update(is_read=True, read_at=timezone.now())
+        client = self._auth_client(alice)
+        resp = client.get("/api/notifications/?is_read=false")
+        assert resp.status_code == 200
+        assert len(resp.json()) == 0
+
+    def test_mark_as_read(self, two_users):
+        alice, bob = two_users
+        n = NotificationService.create(
+            recipient=alice, notification_type=NotificationType.ASSIGNED, message="m", actor=bob
+        )
+        client = self._auth_client(alice)
+        resp = client.patch(f"/api/notifications/{n.pk}/", {"is_read": True}, format="json")
+        assert resp.status_code == 200
+        assert resp.json()["is_read"] is True
+
+    def test_mark_all_read(self, two_users):
+        alice, bob = two_users
+        for _ in range(3):
+            NotificationService.create(
+                recipient=alice, notification_type=NotificationType.COMMENTED, message="m", actor=bob
+            )
+        client = self._auth_client(alice)
+        resp = client.post("/api/notifications/read-all/")
+        assert resp.status_code == 200
+        assert resp.json()["marked_count"] == 3
+        assert Notification.objects.filter(recipient=alice, is_read=False).count() == 0
+
+    def test_delete_notification(self, two_users):
+        alice, bob = two_users
+        n = NotificationService.create(
+            recipient=alice, notification_type=NotificationType.ASSIGNED, message="m", actor=bob
+        )
+        client = self._auth_client(alice)
+        resp = client.delete(f"/api/notifications/{n.pk}/")
+        assert resp.status_code == 204
+        assert not Notification.objects.filter(pk=n.pk).exists()

@@ -2,7 +2,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from projects.models import BoardColumn, Label, ProjectMember, ProjectRole, ProjectStatus, ProjectType, TaskStatus
-from users.models import GlobalRole, User
+from users.models import GlobalRole, NotificationType, User
 
 from .models import (
     ActivityEntityType,
@@ -82,6 +82,14 @@ class TaskService:
 
         task.save(update_fields=["status", "completed_at", "updated_at"])
         _log(actor, task, "status_changed", old={"status": old_status}, new={"status": new_status})
+
+        from users.services import NotificationService
+        NotificationService.notify_watchers(
+            task=task,
+            notification_type=NotificationType.STATUS_CHANGED,
+            message=f"{actor.display_name} changed status of '{task.title}' to {new_status}",
+            actor=actor,
+        )
         return task
 
     @staticmethod
@@ -94,13 +102,34 @@ class TaskService:
         _log(assigned_by, task, "assigned",
              old={"user_id": str(old)} if old else None,
              new={"user_id": str(user.pk)})
+
+        if user.pk != assigned_by.pk:
+            from users.services import NotificationService
+            NotificationService.create(
+                recipient=user,
+                notification_type=NotificationType.ASSIGNED,
+                message=f"{assigned_by.display_name} assigned you to '{task.title}'",
+                actor=assigned_by,
+                task_id=task.pk,
+                project_id=task.project_id,
+            )
         return task
 
     @staticmethod
     def add_co_assignee(task: Task, user: User, assigned_by: User) -> TaskAssignment:
-        assignment, _ = TaskAssignment.objects.get_or_create(
+        assignment, created = TaskAssignment.objects.get_or_create(
             task=task, user=user, defaults={"assigned_by": assigned_by}
         )
+        if created and user.pk != assigned_by.pk:
+            from users.services import NotificationService
+            NotificationService.create(
+                recipient=user,
+                notification_type=NotificationType.ASSIGNED,
+                message=f"{assigned_by.display_name} added you as co-assignee on '{task.title}'",
+                actor=assigned_by,
+                task_id=task.pk,
+                project_id=task.project_id,
+            )
         return assignment
 
     @staticmethod
@@ -192,6 +221,15 @@ class CommentService:
             task=task, author=author, body=body, parent_comment=parent_comment
         )
         _log(author, task, "commented", new={"comment_id": str(comment.pk)})
+
+        from users.services import NotificationService
+        NotificationService.create_for_mentions(body, actor=author, task=task)
+        NotificationService.notify_watchers(
+            task=task,
+            notification_type=NotificationType.COMMENTED,
+            message=f"{author.display_name} commented on '{task.title}'",
+            actor=author,
+        )
         return comment
 
     @staticmethod
@@ -229,7 +267,6 @@ class AccessControlService:
         membership = ProjectMember.objects.filter(project=task.project, user=user).first()
 
         if not membership:
-            # No membership — only creator/assignee can see their own private tasks
             if task.is_private:
                 return task.created_by_id == user.pk or task.assigned_to_id == user.pk
             return False

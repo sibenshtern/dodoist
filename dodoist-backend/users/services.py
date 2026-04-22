@@ -1,7 +1,100 @@
+import uuid
+
 from django.db import transaction
 from django.utils import timezone
 
-from .models import GlobalRole, User, UserPreferences, UserSession
+from .models import GlobalRole, Notification, NotificationType, User, UserPreferences, UserSession
+
+
+def _extract_mention_ids(node: dict, ids: set) -> None:
+    """Recursively collect user UUIDs from ProseMirror mention nodes."""
+    if node.get("type") == "mention":
+        raw = node.get("attrs", {}).get("id")
+        if raw:
+            try:
+                ids.add(uuid.UUID(str(raw)))
+            except (ValueError, AttributeError):
+                pass
+    for child in node.get("content", []):
+        _extract_mention_ids(child, ids)
+
+
+class NotificationService:
+    @staticmethod
+    def create(
+        recipient: User,
+        notification_type: str,
+        message: str,
+        actor: User | None = None,
+        task_id=None,
+        project_id=None,
+    ) -> Notification:
+        notif = Notification.objects.create(
+            recipient=recipient,
+            actor=actor,
+            type=notification_type,
+            message=message,
+            task_id=task_id,
+            project_id=project_id,
+        )
+        try:
+            prefs = recipient.preferences
+            if prefs.notification_channels.get("email"):
+                from users.tasks import send_email_notification
+                send_email_notification.delay(str(notif.pk))
+        except UserPreferences.DoesNotExist:
+            pass
+        return notif
+
+    @staticmethod
+    def notify_watchers(
+        task,
+        notification_type: str,
+        message: str,
+        actor: User,
+    ) -> None:
+        """Notify the task creator and all assignees, excluding the actor."""
+        recipients: set[User] = set()
+        if task.created_by_id:
+            recipients.add(task.created_by)
+        if task.assigned_to_id:
+            recipients.add(task.assigned_to)
+        for assignment in task.co_assignments.select_related("user").all():
+            recipients.add(assignment.user)
+        recipients.discard(actor)
+
+        for recipient in recipients:
+            NotificationService.create(
+                recipient=recipient,
+                notification_type=notification_type,
+                message=message,
+                actor=actor,
+                task_id=task.pk,
+                project_id=task.project_id,
+            )
+
+    @staticmethod
+    def create_for_mentions(body_json: dict, actor: User, task) -> None:
+        """Parse a ProseMirror body and create 'mentioned' notifications."""
+        if not body_json or not isinstance(body_json, dict):
+            return
+        mention_ids: set[uuid.UUID] = set()
+        _extract_mention_ids(body_json, mention_ids)
+        for user_id in mention_ids:
+            try:
+                recipient = User.objects.get(pk=user_id, is_active=True)
+            except User.DoesNotExist:
+                continue
+            if recipient.pk == actor.pk:
+                continue
+            NotificationService.create(
+                recipient=recipient,
+                notification_type=NotificationType.MENTIONED,
+                message=f"{actor.display_name} mentioned you in a comment on '{task.title}'",
+                actor=actor,
+                task_id=task.pk,
+                project_id=task.project_id,
+            )
 
 
 class UserService:

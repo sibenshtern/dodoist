@@ -4,7 +4,7 @@ import uuid
 from django.db import transaction
 from django.utils import timezone
 
-from users.models import User
+from users.models import NotificationType, User
 
 from .models import (
     Board,
@@ -167,7 +167,7 @@ class ProjectService:
         return project
 
     @staticmethod
-    def add_member(project: Project, user: User, role: str) -> ProjectMember:
+    def add_member(project: Project, user: User, role: str, added_by: User | None = None) -> ProjectMember:
         if role not in ProjectRole.values:
             raise ValueError(f"Invalid role '{role}'. Choices: {ProjectRole.values}")
         if not user.has_elevated_access():
@@ -176,9 +176,27 @@ class ProjectService:
             ).exists()
             if not ws_member:
                 raise ValueError("User must be a workspace member first.")
-        member, _ = ProjectMember.objects.update_or_create(
+        member, created = ProjectMember.objects.update_or_create(
             project=project, user=user, defaults={"role": role}
         )
+        if added_by and added_by.pk != user.pk:
+            from users.services import NotificationService
+            if created:
+                NotificationService.create(
+                    recipient=user,
+                    notification_type=NotificationType.INVITED,
+                    message=f"{added_by.display_name} invited you to project '{project.name}'",
+                    actor=added_by,
+                    project_id=project.pk,
+                )
+            else:
+                NotificationService.create(
+                    recipient=user,
+                    notification_type=NotificationType.ROLE_CHANGED,
+                    message=f"{added_by.display_name} changed your role to {role} in '{project.name}'",
+                    actor=added_by,
+                    project_id=project.pk,
+                )
         return member
 
     @staticmethod

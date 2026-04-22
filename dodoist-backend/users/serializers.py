@@ -80,3 +80,20 @@ class UserPreferencesUpdateSerializer(serializers.Serializer):
     default_view = serializers.ChoiceField(
         choices=["list", "board", "calendar"], required=False
     )
+
+
+class NotificationSerializer(serializers.Serializer):
+    id = serializers.UUIDField()
+    type = serializers.CharField()
+    message = serializers.CharField()
+    task_id = serializers.UUIDField(allow_null=True)
+    project_id = serializers.UUIDField(allow_null=True)
+    is_read = serializers.BooleanField()
+    created_at = serializers.DateTimeField()
+    read_at = serializers.DateTimeField(allow_null=True)
+    actor = serializers.SerializerMethodField()
+
+    def get_actor(self, obj):
+        if obj.actor_id:
+            return {"id": str(obj.actor_id), "display_name": obj.actor.display_name}
+        return None
