@@ -1,0 +1,43 @@
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+  backend:
+    build: ./dodoist-backend
+    command: python manage.py runserver 0.0.0.0:8000
+    volumes:
+      - ./dodoist-backend:/app
+    ports:
+      - "8000:8000"
+    environment:
+      - DJANGO_DEBUG=true
+      - CELERY_BROKER_URL=redis://redis:6379/0
+    depends_on:
+      - redis
+
+  celery:
+    build: ./dodoist-backend
+    command: celery -A dodoist worker -l info
+    volumes:
+      - ./dodoist-backend:/app
+    environment:
+      - DJANGO_DEBUG=true
+      - CELERY_BROKER_URL=redis://redis:6379/0
+    depends_on:
+      - redis
+      - backend
+
+  celery-beat:
+    build: ./dodoist-backend
+    command: celery -A dodoist beat -l info
+    volumes:
+      - ./dodoist-backend:/app
+    environment:
+      - DJANGO_DEBUG=true
+      - CELERY_BROKER_URL=redis://redis:6379/0
+    depends_on:
+      - redis
+      - backend
