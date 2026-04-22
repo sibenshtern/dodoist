@@ -1,11 +1,11 @@
-import { Component, computed, inject, OnInit } from '@angular/core';
+import { Component, computed, inject, OnDestroy, OnInit, signal } from '@angular/core';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { TuiIcon } from '@taiga-ui/core';
+import { interval, Subscription, switchMap, EMPTY, shareReplay } from 'rxjs';
 import { UserService } from '../../services/user.service';
 import { AuthService } from '../../services/auth.service';
 import { DashboardService, ProjectSummary } from '../../services/dashboard.service';
-import { signal } from '@angular/core';
-import { switchMap, EMPTY, shareReplay } from 'rxjs';
+import { NotificationsService } from '../../services/notifications.service';
 
 interface NavItem {
   label: string;
@@ -20,10 +20,13 @@ interface NavItem {
   templateUrl: './dashboard-layout.component.html',
   styleUrl: './dashboard-layout.component.scss',
 })
-export class DashboardLayoutComponent implements OnInit {
+export class DashboardLayoutComponent implements OnInit, OnDestroy {
   private readonly userService = inject(UserService);
   private readonly authService = inject(AuthService);
   private readonly dashboardService = inject(DashboardService);
+  readonly notifService = inject(NotificationsService);
+
+  private pollSub?: Subscription;
 
   readonly navItems: NavItem[] = [
     { label: 'Dashboard',  icon: '@tui.layout-dashboard', path: '/home' },
@@ -88,6 +91,16 @@ export class DashboardLayoutComponent implements OnInit {
         error: console.error,
       });
     }
+
+    // Initial load + 60-second polling for notifications
+    this.notifService.list({ limit: 50 }).subscribe({ error: console.error });
+    this.pollSub = interval(60_000).subscribe(() => {
+      this.notifService.list({ limit: 50 }).subscribe({ error: console.error });
+    });
+  }
+
+  ngOnDestroy(): void {
+    this.pollSub?.unsubscribe();
   }
 
   logout(): void {

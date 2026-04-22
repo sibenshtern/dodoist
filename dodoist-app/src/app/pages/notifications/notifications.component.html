@@ -1,0 +1,42 @@
+<div class="notif-page">
+
+  <div class="notif-page__header">
+    <h1 class="notif-page__title">Notifications</h1>
+    @if (svc.unreadCount() > 0) {
+      <button class="notif-page__mark-all" (click)="markAllRead()">
+        Mark all as read
+      </button>
+    }
+  </div>
+
+  @if (svc.notifications().length === 0) {
+    <div class="notif-empty">
+      <tui-icon icon="@tui.bell-off" class="notif-empty__icon" />
+      <p class="notif-empty__text">No notifications yet</p>
+    </div>
+  } @else {
+    <ul class="notif-list">
+      @for (n of svc.notifications(); track n.id) {
+        <li class="notif-item" [class.notif-item--unread]="!n.is_read">
+          <div class="notif-item__dot"></div>
+          <div class="notif-item__body">
+            <span class="notif-item__type">{{ typeLabel(n.type) }}</span>
+            <p class="notif-item__message">{{ n.message }}</p>
+            <span class="notif-item__time">{{ n.created_at | date:'MMM d, y, h:mm a' }}</span>
+          </div>
+          <div class="notif-item__actions">
+            @if (!n.is_read) {
+              <button class="notif-item__btn" title="Mark as read" (click)="markRead(n, $event)">
+                <tui-icon icon="@tui.check" />
+              </button>
+            }
+            <button class="notif-item__btn notif-item__btn--del" title="Delete" (click)="remove(n, $event)">
+              <tui-icon icon="@tui.x" />
+            </button>
+          </div>
+        </li>
+      }
+    </ul>
+  }
+
+</div>

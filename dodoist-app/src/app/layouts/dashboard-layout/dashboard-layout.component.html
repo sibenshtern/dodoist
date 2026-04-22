@@ -41,8 +41,13 @@
     </div>
 
     <div class="sidebar__footer">
-      <button class="nav__item" [routerLink]="'/notifications'">
-        <tui-icon icon="@tui.bell" class="nav__icon" />
+      <button class="nav__item" [routerLink]="'/notifications'" routerLinkActive="nav__item--active">
+        <span class="notif-bell">
+          <tui-icon icon="@tui.bell" class="nav__icon" />
+          @if (notifService.unreadCount() > 0) {
+            <span class="notif-bell__badge">{{ notifService.unreadCount() > 99 ? '99+' : notifService.unreadCount() }}</span>
+          }
+        </span>
         Notifications
       </button>
       <button class="nav__item" [routerLink]="'/settings'">
