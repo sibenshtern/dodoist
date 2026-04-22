@@ -41,11 +41,14 @@ export class AuthService {
     password: string,
     displayName: string,
     timezone: string,
+    inviteToken?: string,
   ): Observable<AuthResponse> {
+    const body: Record<string, string> = { email, password, display_name: displayName, timezone };
+    if (inviteToken) body['invite_token'] = inviteToken;
     return this.http
       .post<AuthResponse>(
         `${environment.apiBase}/api/auth/register`,
-        { email, password, display_name: displayName, timezone },
+        body,
         { withCredentials: true },
       )
       .pipe(tap(response => this.accessToken.set(response.access_token)));

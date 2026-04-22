@@ -6,6 +6,7 @@ class RegisterSerializer(serializers.Serializer):
     password = serializers.CharField(min_length=8, write_only=True)
     display_name = serializers.CharField(min_length=2, max_length=255)
     timezone = serializers.CharField(max_length=64, default="UTC")
+    invite_token = serializers.CharField(required=False, allow_blank=True, default="")
 
 
 class LoginSerializer(serializers.Serializer):
@@ -20,6 +21,13 @@ class AuthUserSerializer(serializers.Serializer):
     display_name = serializers.CharField()
 
 
+class ActiveWorkspaceSerializer(serializers.Serializer):
+    id = serializers.UUIDField()
+    slug = serializers.CharField()
+    name = serializers.CharField()
+    is_personal = serializers.BooleanField()
+
+
 class UserProfileSerializer(serializers.Serializer):
     """Full user profile returned by GET /api/users/me."""
     id = serializers.UUIDField()
@@ -27,6 +35,13 @@ class UserProfileSerializer(serializers.Serializer):
     display_name = serializers.CharField()
     avatar_url = serializers.CharField(allow_null=True)
     timezone = serializers.CharField()
+    active_workspace = serializers.SerializerMethodField()
+
+    def get_active_workspace(self, obj):
+        ws = obj.active_workspace
+        if ws is None:
+            return None
+        return ActiveWorkspaceSerializer(ws).data
 
 
 class UserListSerializer(serializers.Serializer):

@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+    ActiveWorkspaceView,
     ForgotPasswordView,
     LoginView,
     LogoutView,
@@ -32,6 +33,7 @@ urlpatterns = [
     path("api/auth/reset-password", ResetPasswordView.as_view(), name="auth-reset-password"),
     # Users
     path("api/users/me", MeView.as_view(), name="users-me"),
+    path("api/users/me/active-workspace/", ActiveWorkspaceView.as_view(), name="users-active-workspace"),
     path("api/users/", UserListView.as_view(), name="user-list"),
     path("api/users/<uuid:pk>/", UserDetailView.as_view(), name="user-detail"),
     path("api/users/<uuid:pk>/preferences/", UserPreferencesView.as_view(), name="user-preferences"),

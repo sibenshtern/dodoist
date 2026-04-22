@@ -2,6 +2,7 @@ import { Component, computed, HostListener, inject, OnDestroy, OnInit, signal } 
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { TuiIcon } from '@taiga-ui/core';
 import { interval, Subscription, switchMap, EMPTY } from 'rxjs';
+import { toObservable } from '@angular/core/rxjs-interop';
 import { UserService } from '../../services/user.service';
 import { AuthService } from '../../services/auth.service';
 import { DashboardService, ProjectSummary } from '../../services/dashboard.service';
@@ -28,6 +29,9 @@ export class DashboardLayoutComponent implements OnInit, OnDestroy {
   readonly notifService = inject(NotificationsService);
 
   private pollSub?: Subscription;
+
+  // toObservable must be created in injection context (class field, not ngOnInit)
+  private readonly workspace$ = toObservable(this.userService.currentWorkspace);
 
   readonly navItems: NavItem[] = [
     { label: 'Dashboard',  icon: '@tui.layout-dashboard', path: '/home' },
@@ -80,14 +84,15 @@ export class DashboardLayoutComponent implements OnInit, OnDestroy {
   });
 
   ngOnInit(): void {
-    if (!this.userService.currentUser()) {
-      this.userService.loadCurrentUser().subscribe({ error: console.error });
-    }
+    // Load user (hydrates currentWorkspace from active_workspace), then seed project list.
+    // After that, toObservable on currentWorkspace keeps the list in sync whenever the user
+    // switches workspace (e.g. from the /workspaces page).
+    this.userService.loadCurrentUser().subscribe({ error: console.error });
 
-    this.userService.loadWorkspaces().pipe(
-      switchMap(workspaces => {
-        if (workspaces.length === 0) return EMPTY;
-        return this.dashboardService.getAllProjects(workspaces.map(w => w.slug));
+    this.pollSub = this.workspace$.pipe(
+      switchMap(ws => {
+        if (!ws) return EMPTY;
+        return this.dashboardService.getProjectsForActiveWorkspace(ws.slug);
       }),
     ).subscribe({
       next: p => this.projects.set(p),
@@ -96,9 +101,10 @@ export class DashboardLayoutComponent implements OnInit, OnDestroy {
 
     // Initial load + 60-second polling for notifications
     this.notifService.list({ limit: 50 }).subscribe({ error: console.error });
-    this.pollSub = interval(60_000).subscribe(() => {
+    const notifPoll = interval(60_000).subscribe(() => {
       this.notifService.list({ limit: 50 }).subscribe({ error: console.error });
     });
+    this.pollSub.add(notifPoll);
   }
 
   ngOnDestroy(): void {

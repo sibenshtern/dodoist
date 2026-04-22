@@ -29,7 +29,10 @@ def other_user(db):
 
 @pytest.fixture
 def workspace(user):
-    return WorkspaceService.create_workspace(owner=user, name="Acme", slug="acme-analytics")
+    ws = WorkspaceService.create_workspace(owner=user, name="Acme", slug="acme-analytics")
+    from users.services import UserService as _US
+    _US.set_active_workspace(user, ws)
+    return ws
 
 
 @pytest.fixture

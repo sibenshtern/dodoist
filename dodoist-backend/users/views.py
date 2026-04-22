@@ -55,6 +55,7 @@ class RegisterView(APIView):
                 password=data["password"],
                 display_name=data["display_name"],
                 user_timezone=data.get("timezone", "UTC"),
+                invite_token=data.get("invite_token") or None,
             )
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=400)
@@ -181,12 +182,46 @@ class MeView(APIView):
     """
     GET /api/users/me
 
-    Returns the authenticated user's profile.
+    Returns the authenticated user's profile including active_workspace.
     """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        return Response(UserProfileSerializer(request.user).data)
+        user = User.objects.select_related("active_workspace").get(pk=request.user.pk)
+        return Response(UserProfileSerializer(user).data)
+
+
+class ActiveWorkspaceView(APIView):
+    """
+    PATCH /api/users/me/active-workspace/
+
+    Sets the authenticated user's active workspace.
+    Body: { workspace_slug } or { workspace_id }
+    """
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request):
+        from projects.models import Workspace
+        workspace_slug = request.data.get("workspace_slug")
+        workspace_id = request.data.get("workspace_id")
+        if workspace_slug:
+            try:
+                workspace = Workspace.objects.get(slug=workspace_slug, deleted_at__isnull=True)
+            except Workspace.DoesNotExist:
+                return Response({"detail": "Workspace not found."}, status=404)
+        elif workspace_id:
+            try:
+                workspace = Workspace.objects.get(pk=workspace_id, deleted_at__isnull=True)
+            except (Workspace.DoesNotExist, ValueError):
+                return Response({"detail": "Workspace not found."}, status=404)
+        else:
+            return Response({"detail": "workspace_slug or workspace_id is required."}, status=400)
+        try:
+            user = UserService.set_active_workspace(request.user, workspace)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=400)
+        user = User.objects.select_related("active_workspace").get(pk=user.pk)
+        return Response(UserProfileSerializer(user).data)
 
 
 class UserListView(APIView):
@@ -367,9 +402,11 @@ def _get_client_ip(request):
 
 class NotificationListView(APIView):
     """
-    GET /api/notifications/  — list notifications for current user
+    GET /api/notifications/  — list notifications for current user, scoped to active workspace
     """
     def get(self, request):
+        from projects.models import Project
+        from projects.request_helpers import _active_ws
         from users.models import Notification
         from users.serializers import NotificationSerializer
         qs = (
@@ -378,6 +415,15 @@ class NotificationListView(APIView):
             .select_related("actor")
             .order_by("-created_at")
         )
+        active_ws = _active_ws(request)
+        if active_ws is not None:
+            active_project_ids = Project.objects.filter(
+                workspace=active_ws
+            ).values_list("id", flat=True)
+            qs = qs.filter(
+                models.Q(project_id__in=active_project_ids)
+                | models.Q(project_id__isnull=True)
+            )
         is_read = request.query_params.get("is_read")
         if is_read is not None:
             qs = qs.filter(is_read=is_read.lower() == "true")

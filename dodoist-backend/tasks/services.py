@@ -312,6 +312,21 @@ class AccessControlService:
 
         return False
 
+    @staticmethod
+    def workspace_member(user: User, workspace):
+        from projects.models import WorkspaceMember
+        return WorkspaceMember.objects.filter(workspace=workspace, user=user).first()
+
+    @staticmethod
+    def is_workspace_owner(user: User, workspace) -> bool:
+        return workspace.owner_id == user.pk
+
+    @staticmethod
+    def is_workspace_admin_or_owner(user: User, workspace) -> bool:
+        from projects.models import WorkspaceMember, WorkspaceRole
+        member = WorkspaceMember.objects.filter(workspace=workspace, user=user).first()
+        return member is not None and member.role in (WorkspaceRole.OWNER, WorkspaceRole.ADMIN)
+
 
 # ---------------------------------------------------------------------------
 # AttachmentService

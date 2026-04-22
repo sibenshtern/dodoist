@@ -8,14 +8,14 @@
       <span class="brand-name">Dodoist</span>
     </div>
 
-    <button class="workspace-switcher">
+    <a class="workspace-switcher" routerLink="/workspaces">
       <div class="workspace-icon">{{ workspaceInitial() }}</div>
       <div class="workspace-info">
         <span class="workspace-name">{{ workspaceName() }}</span>
         <span class="workspace-plan">{{ workspacePlan() }}</span>
       </div>
       <tui-icon icon="@tui.chevron-down" class="workspace-chevron" />
-    </button>
+    </a>
 
     <button class="search-trigger" (click)="searchOpen.set(true)" title="Search tasks (⌘K)">
       <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">

@@ -631,3 +631,46 @@ class TestUserPreferencesView:
         c.force_authenticate(user=other)
         resp = c.put(f"/api/users/{user.pk}/preferences/", {"theme": "dark", "language": "en", "default_view": "list"}, format="json")
         assert resp.status_code in (403, 404)
+
+
+# ---------------------------------------------------------------------------
+# Phase 6 — Active workspace switching
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+class TestSetActiveWorkspace:
+    def test_new_user_active_workspace_is_personal(self, db):
+        from users.services import UserService
+        u = UserService.register(email="fresh@example.com", password="pass123", display_name="Fresh")
+        assert u.active_workspace is not None
+        assert u.active_workspace.is_personal is True
+
+    def test_switch_to_valid_workspace(self, db):
+        from projects.services import WorkspaceService
+        from users.services import UserService
+        u = UserService.register(email="switcher@example.com", password="pass123", display_name="S")
+        ws = WorkspaceService.create_team_workspace(owner=u, name="Team", slug="team-sw")
+        UserService.set_active_workspace(u, ws)
+        u.refresh_from_db()
+        assert u.active_workspace == ws
+
+    def test_cannot_switch_to_non_member_workspace(self, db):
+        from projects.services import WorkspaceService
+        from users.services import UserService
+        owner = UserService.register(email="owner99@example.com", password="pass123", display_name="Ow")
+        ws = WorkspaceService.create_team_workspace(owner=owner, name="Private", slug="private-99")
+        other = UserService.register(email="stranger99@example.com", password="pass123", display_name="St")
+        with pytest.raises(ValueError):
+            UserService.set_active_workspace(other, ws)
+
+    def test_patch_active_workspace_endpoint(self, db):
+        from rest_framework.test import APIClient
+        from projects.services import WorkspaceService
+        from users.services import UserService
+        u = UserService.register(email="patch@example.com", password="pass123", display_name="P")
+        ws = WorkspaceService.create_team_workspace(owner=u, name="PatchWs", slug="patch-ws")
+        client = APIClient()
+        client.force_authenticate(user=u)
+        resp = client.patch("/api/users/me/active-workspace/", {"workspace_slug": ws.slug}, format="json")
+        assert resp.status_code == 200
+        assert resp.data["active_workspace"]["slug"] == ws.slug

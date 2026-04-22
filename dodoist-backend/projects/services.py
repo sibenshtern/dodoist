@@ -10,6 +10,7 @@ from .models import (
     Board,
     BoardColumn,
     BoardType,
+    InvitationKind,
     Project,
     ProjectMember,
     ProjectRole,
@@ -19,8 +20,10 @@ from .models import (
     SprintStatus,
     TaskStatus,
     Workspace,
+    WorkspaceInvitation,
     WorkspaceMember,
     WorkspacePlan,
+    WorkspaceRole,
 )
 
 _DEFAULT_COLUMNS = [
@@ -48,6 +51,19 @@ def _unique_slug(base: str) -> str:
     return candidate
 
 
+def _ws_log(actor: User, workspace: Workspace, action: str, old=None, new=None) -> None:
+    from tasks.models import ActivityEntityType, ActivityLog
+    ActivityLog.objects.create(
+        entity_type=ActivityEntityType.WORKSPACE,
+        entity_id=workspace.pk,
+        actor=actor,
+        action=action,
+        old_value=old,
+        new_value=new,
+        project=None,
+    )
+
+
 class WorkspaceService:
     @staticmethod
     @transaction.atomic
@@ -59,7 +75,27 @@ class WorkspaceService:
             owner=user,
             is_personal=True,
         )
-        WorkspaceMember.objects.create(workspace=ws, user=user)
+        WorkspaceMember.objects.create(workspace=ws, user=user, role=WorkspaceRole.OWNER)
+        if user.active_workspace_id is None:
+            user.active_workspace = ws
+            user.save(update_fields=["active_workspace"])
+        return ws
+
+    @staticmethod
+    @transaction.atomic
+    def create_team_workspace(
+        owner: User,
+        name: str,
+        slug: str | None = None,
+        description: str = "",
+    ) -> Workspace:
+        slug = slug or _unique_slug(name)
+        if Workspace.objects.filter(slug=slug).exists():
+            raise ValueError(f"Slug '{slug}' is already taken.")
+        ws = Workspace.objects.create(
+            slug=slug, name=name, owner=owner, description=description
+        )
+        WorkspaceMember.objects.create(workspace=ws, user=owner, role=WorkspaceRole.OWNER)
         return ws
 
     @staticmethod
@@ -71,25 +107,145 @@ class WorkspaceService:
         description: str = "",
         plan: str = WorkspacePlan.FREE,
     ) -> Workspace:
+        """Backward-compatible alias for create_team_workspace; plan param is accepted but ignored in logic."""
         slug = slug or _unique_slug(name)
         if Workspace.objects.filter(slug=slug).exists():
             raise ValueError(f"Slug '{slug}' is already taken.")
         ws = Workspace.objects.create(
             slug=slug, name=name, owner=owner, description=description, plan=plan
         )
-        WorkspaceMember.objects.create(workspace=ws, user=owner)
+        WorkspaceMember.objects.create(workspace=ws, user=owner, role=WorkspaceRole.OWNER)
         return ws
 
     @staticmethod
-    def add_member(workspace: Workspace, user: User) -> WorkspaceMember:
-        member, _ = WorkspaceMember.objects.get_or_create(workspace=workspace, user=user)
+    @transaction.atomic
+    def add_member(
+        workspace: Workspace,
+        user: User,
+        role: str = WorkspaceRole.MEMBER,
+        invited_by: User | None = None,
+    ) -> WorkspaceMember:
+        if role == WorkspaceRole.OWNER:
+            raise ValueError("Cannot assign OWNER role via add_member. Use transfer_ownership.")
+        defaults = {"role": role}
+        if invited_by is not None:
+            defaults["invited_by"] = invited_by
+        member, _ = WorkspaceMember.objects.update_or_create(
+            workspace=workspace, user=user, defaults=defaults
+        )
         return member
 
     @staticmethod
-    def remove_member(workspace: Workspace, user: User) -> None:
+    @transaction.atomic
+    def remove_member(workspace: Workspace, user: User) -> int:
         if workspace.owner_id == user.pk:
-            raise ValueError("Cannot remove the workspace owner.")
+            raise ValueError("Cannot remove the workspace owner. Transfer ownership first.")
         WorkspaceMember.objects.filter(workspace=workspace, user=user).delete()
+        deleted, _ = ProjectMember.objects.filter(
+            project__workspace=workspace, user=user
+        ).delete()
+        _ws_log(user, workspace, "member_removed", new={"user_id": str(user.pk)})
+        return deleted
+
+    @staticmethod
+    @transaction.atomic
+    def change_role(
+        workspace: Workspace, user: User, new_role: str, actor: User
+    ) -> WorkspaceMember:
+        if new_role == WorkspaceRole.OWNER:
+            raise ValueError("Cannot promote to OWNER via change_role. Use transfer_ownership.")
+        if new_role not in WorkspaceRole.values:
+            raise ValueError(f"Invalid role '{new_role}'.")
+
+        actor_member = WorkspaceMember.objects.filter(workspace=workspace, user=actor).first()
+        if actor_member is None or actor_member.role not in (WorkspaceRole.OWNER, WorkspaceRole.ADMIN):
+            raise ValueError("Only workspace Owner or Admin can change member roles.")
+
+        target_member = WorkspaceMember.objects.filter(workspace=workspace, user=user).first()
+        if target_member is None:
+            raise ValueError("User is not a member of this workspace.")
+        if target_member.role == WorkspaceRole.OWNER:
+            raise ValueError("Cannot demote the workspace Owner.")
+        if actor_member.role == WorkspaceRole.ADMIN and target_member.role == WorkspaceRole.ADMIN:
+            raise ValueError("Admins cannot change the role of other Admins.")
+
+        old_role = target_member.role
+        target_member.role = new_role
+        target_member.save(update_fields=["role"])
+        _ws_log(actor, workspace, "role_changed",
+                old={"user_id": str(user.pk), "role": old_role},
+                new={"user_id": str(user.pk), "role": new_role})
+        return target_member
+
+    @staticmethod
+    @transaction.atomic
+    def transfer_ownership(workspace: Workspace, new_owner: User, actor: User) -> Workspace:
+        if workspace.owner_id != actor.pk:
+            raise ValueError("Only the current Owner can transfer ownership.")
+        if workspace.owner_id == new_owner.pk:
+            raise ValueError("New owner is already the current owner.")
+
+        new_owner_member = WorkspaceMember.objects.filter(workspace=workspace, user=new_owner).first()
+        if new_owner_member is None:
+            raise ValueError("New owner must be a member of the workspace.")
+
+        old_owner_member = WorkspaceMember.objects.filter(workspace=workspace, user=actor).first()
+
+        workspace.owner = new_owner
+        workspace.save(update_fields=["owner"])
+        new_owner_member.role = WorkspaceRole.OWNER
+        new_owner_member.save(update_fields=["role"])
+        if old_owner_member:
+            old_owner_member.role = WorkspaceRole.ADMIN
+            old_owner_member.save(update_fields=["role"])
+
+        _ws_log(actor, workspace, "ownership_transferred",
+                old={"owner_id": str(actor.pk)},
+                new={"owner_id": str(new_owner.pk)})
+        return workspace
+
+    @staticmethod
+    @transaction.atomic
+    def soft_delete(workspace: Workspace, actor: User) -> Workspace:
+        if workspace.owner_id != actor.pk:
+            raise ValueError("Only the workspace Owner can delete a workspace.")
+        if workspace.is_personal:
+            raise ValueError("Personal workspaces cannot be deleted.")
+        if workspace.deleted_at is not None:
+            raise ValueError("Workspace is already scheduled for deletion.")
+
+        now = timezone.now()
+        workspace.deleted_at = now
+        workspace.deleted_by = actor
+        workspace.delete_scheduled_for = now + timezone.timedelta(days=30)
+        workspace.save(update_fields=["deleted_at", "deleted_by", "delete_scheduled_for"])
+        _ws_log(actor, workspace, "soft_deleted",
+                new={"delete_scheduled_for": workspace.delete_scheduled_for.isoformat()})
+        return workspace
+
+    @staticmethod
+    @transaction.atomic
+    def restore(workspace: Workspace, actor: User) -> Workspace:
+        if workspace.owner_id != actor.pk:
+            raise ValueError("Only the workspace Owner can restore a workspace.")
+        if workspace.deleted_at is None:
+            raise ValueError("Workspace is not scheduled for deletion.")
+        if workspace.delete_scheduled_for and workspace.delete_scheduled_for <= timezone.now():
+            raise ValueError("Grace period has expired; workspace cannot be restored.")
+
+        workspace.deleted_at = None
+        workspace.deleted_by = None
+        workspace.delete_scheduled_for = None
+        workspace.save(update_fields=["deleted_at", "deleted_by", "delete_scheduled_for"])
+        _ws_log(actor, workspace, "restored")
+        return workspace
+
+    @staticmethod
+    @transaction.atomic
+    def leave(workspace: Workspace, user: User) -> int:
+        if workspace.owner_id == user.pk:
+            raise ValueError("Owner cannot leave the workspace. Transfer ownership first.")
+        return WorkspaceService.remove_member(workspace, user)
 
 
 class ProjectService:

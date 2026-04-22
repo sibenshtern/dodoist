@@ -1,6 +1,6 @@
 import { Component, inject, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
-import { Router, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { TuiButton } from '@taiga-ui/core';
 import { AuthService } from '../../services/auth.service';
 
@@ -14,6 +14,7 @@ export class SignupComponent {
   private readonly fb = inject(FormBuilder);
   private readonly authService = inject(AuthService);
   private readonly router = inject(Router);
+  private readonly route = inject(ActivatedRoute);
 
   readonly showPassword = signal(false);
   readonly isLoading = signal(false);
@@ -49,10 +50,11 @@ export class SignupComponent {
     }
 
     const { name, email, password, timezone } = this.form.getRawValue();
+    const inviteToken = this.route.snapshot.queryParamMap.get('invite') ?? undefined;
     this.isLoading.set(true);
     this.serverError.set(null);
 
-    this.authService.register(email, password, name, timezone).subscribe({
+    this.authService.register(email, password, name, timezone, inviteToken).subscribe({
       next: () => {
         this.router.navigate(['/verify-email']);
       },

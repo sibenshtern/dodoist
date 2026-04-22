@@ -1,5 +1,12 @@
 from django.urls import path
 
+from .invitations_views import (
+    InvitationAcceptView,
+    MyInvitationsView,
+    WorkspaceInvitationDetailView,
+    WorkspaceInvitationListCreateView,
+    WorkspaceInviteLinkView,
+)
 from .views import (
     BoardColumnDetailView,
     BoardColumnListView,
@@ -19,17 +26,34 @@ from .views import (
     SprintStartView,
     SprintTaskView,
     WorkspaceDetailView,
+    WorkspaceLeaveView,
     WorkspaceListCreateView,
     WorkspaceMemberDetailView,
     WorkspaceMemberListView,
+    WorkspaceRestoreView,
+    WorkspaceTransferOwnershipView,
 )
 
 urlpatterns = [
     # Workspaces
     path("api/workspaces/", WorkspaceListCreateView.as_view(), name="workspace-list-create"),
     path("api/workspaces/<slug:slug>/", WorkspaceDetailView.as_view(), name="workspace-detail"),
+    path("api/workspaces/<slug:slug>/restore/", WorkspaceRestoreView.as_view(), name="workspace-restore"),
+    path("api/workspaces/<slug:slug>/transfer/", WorkspaceTransferOwnershipView.as_view(), name="workspace-transfer"),
+    path("api/workspaces/<slug:slug>/leave/", WorkspaceLeaveView.as_view(), name="workspace-leave"),
+
+    # Workspace members
     path("api/workspaces/<slug:slug>/members/", WorkspaceMemberListView.as_view(), name="workspace-member-list"),
     path("api/workspaces/<slug:slug>/members/<uuid:user_id>/", WorkspaceMemberDetailView.as_view(), name="workspace-member-detail"),
+
+    # Workspace invitations
+    path("api/workspaces/<slug:slug>/invitations/", WorkspaceInvitationListCreateView.as_view(), name="workspace-invitation-list"),
+    path("api/workspaces/<slug:slug>/invitations/<uuid:pk>/", WorkspaceInvitationDetailView.as_view(), name="workspace-invitation-detail"),
+    path("api/workspaces/<slug:slug>/invite-links/", WorkspaceInviteLinkView.as_view(), name="workspace-invite-link"),
+
+    # Global invitation endpoints
+    path("api/invitations/accept/", InvitationAcceptView.as_view(), name="invitation-accept"),
+    path("api/invitations/me/", MyInvitationsView.as_view(), name="invitation-me"),
 
     # Projects (nested under workspace for creation/listing)
     path("api/workspaces/<slug:slug>/projects/", ProjectListCreateView.as_view(), name="project-list-create"),

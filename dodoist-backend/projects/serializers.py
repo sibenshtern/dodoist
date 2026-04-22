@@ -5,6 +5,7 @@ from rest_framework import serializers
 from users.models import User
 
 from .models import (
+    InvitationKind,
     Label,
     Project,
     ProjectMember,
@@ -12,7 +13,9 @@ from .models import (
     ProjectType,
     SprintStatus,
     Workspace,
+    WorkspaceInvitation,
     WorkspacePlan,
+    WorkspaceRole,
 )
 
 
@@ -41,6 +44,8 @@ class WorkspaceSerializer(serializers.ModelSerializer):
             "is_personal",
             "created_at",
             "updated_at",
+            "deleted_at",
+            "delete_scheduled_for",
         ]
 
 
@@ -74,7 +79,41 @@ class WorkspaceUpdateSerializer(serializers.Serializer):
 class WorkspaceMemberSerializer(serializers.Serializer):
     id = serializers.UUIDField()
     user = UserBriefSerializer()
+    role = serializers.CharField()
     joined_at = serializers.DateTimeField()
+
+
+class WorkspaceMemberAddSerializer(serializers.Serializer):
+    user_id = serializers.UUIDField()
+    role = serializers.ChoiceField(
+        choices=[WorkspaceRole.ADMIN, WorkspaceRole.MEMBER],
+        default=WorkspaceRole.MEMBER,
+        required=False,
+    )
+
+    def validate_user_id(self, value):
+        try:
+            return User.objects.get(pk=value, is_active=True)
+        except User.DoesNotExist:
+            raise serializers.ValidationError("User not found.")
+
+
+class WorkspaceMemberUpdateSerializer(serializers.Serializer):
+    role = serializers.ChoiceField(choices=[WorkspaceRole.ADMIN, WorkspaceRole.MEMBER])
+
+
+class WorkspaceInvitationSerializer(serializers.Serializer):
+    id = serializers.UUIDField()
+    kind = serializers.CharField()
+    email = serializers.CharField()
+    role_to_grant = serializers.CharField()
+    invited_by = UserBriefSerializer(allow_null=True)
+    created_at = serializers.DateTimeField()
+    expires_at = serializers.DateTimeField(allow_null=True)
+    max_uses = serializers.IntegerField(allow_null=True)
+    use_count = serializers.IntegerField()
+    accepted_at = serializers.DateTimeField(allow_null=True)
+    revoked_at = serializers.DateTimeField(allow_null=True)
 
 
 # ---------------------------------------------------------------------------

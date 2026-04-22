@@ -137,12 +137,8 @@ export class DashboardService {
     );
   }
 
-  /** Fetch projects from every workspace the user belongs to and flatten. */
-  getAllProjects(workspaceSlugs: string[]): Observable<ProjectSummary[]> {
-    if (workspaceSlugs.length === 0) return of([]);
-    return forkJoin(
-      workspaceSlugs.map(slug => this.getProjects(slug).pipe(catchError(() => of([])))),
-    ).pipe(map(results => results.flat()));
+  getProjectsForActiveWorkspace(workspaceSlug: string): Observable<ProjectSummary[]> {
+    return this.getProjects(workspaceSlug);
   }
 
   getProjects(workspaceSlug: string): Observable<ProjectSummary[]> {
