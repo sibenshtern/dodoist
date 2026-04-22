@@ -39,6 +39,24 @@ def _log(actor: User, task: Task, action: str, old=None, new=None) -> None:
     )
 
 
+def _has_dependency_cycle(task: Task, depends_on: Task) -> bool:
+    """Return True if adding task→depends_on would create a cycle (iterative DFS)."""
+    visited: set = set()
+    stack = [depends_on.pk]
+    while stack:
+        current = stack.pop()
+        if current == task.pk:
+            return True
+        if current in visited:
+            continue
+        visited.add(current)
+        neighbors = TaskDependency.objects.filter(
+            task_id=current
+        ).values_list("depends_on_task_id", flat=True)
+        stack.extend(neighbors)
+    return False
+
+
 # ---------------------------------------------------------------------------
 # TaskService
 # ---------------------------------------------------------------------------
@@ -72,6 +90,7 @@ class TaskService:
         return task
 
     @staticmethod
+    @transaction.atomic
     def update_status(task: Task, new_status: str, actor: User) -> Task:
         if task.is_deleted():
             raise ValueError("Cannot update status of a deleted task.")
@@ -99,6 +118,7 @@ class TaskService:
         return task
 
     @staticmethod
+    @transaction.atomic
     def assign_user(task: Task, user: User, assigned_by: User) -> Task:
         if task.is_deleted():
             raise ValueError("Cannot assign a deleted task.")
@@ -122,6 +142,7 @@ class TaskService:
         return task
 
     @staticmethod
+    @transaction.atomic
     def add_co_assignee(task: Task, user: User, assigned_by: User) -> TaskAssignment:
         assignment, created = TaskAssignment.objects.get_or_create(
             task=task, user=user, defaults={"assigned_by": assigned_by}
@@ -143,6 +164,7 @@ class TaskService:
         TaskAssignment.objects.filter(task=task, user=user).delete()
 
     @staticmethod
+    @transaction.atomic
     def soft_delete(task: Task, actor: User) -> Task:
         if task.is_deleted():
             raise ValueError("Task is already deleted.")
@@ -152,6 +174,7 @@ class TaskService:
         return task
 
     @staticmethod
+    @transaction.atomic
     def restore(task: Task, actor: User) -> Task:
         if not task.is_deleted():
             raise ValueError("Task is not deleted.")
@@ -170,16 +193,20 @@ class TaskService:
         TaskLabel.objects.filter(task=task, label=label).delete()
 
     @staticmethod
+    @transaction.atomic
     def add_dependency(task: Task, depends_on: Task, dep_type: str, created_by: User) -> TaskDependency:
         if task.pk == depends_on.pk:
             raise ValueError("A task cannot depend on itself.")
         if dep_type not in DependencyType.values:
             raise ValueError(f"Invalid dependency type '{dep_type}'.")
+        if _has_dependency_cycle(task, depends_on):
+            raise ValueError("CYCLIC_DEPENDENCY")
         return TaskDependency.objects.create(
             task=task, depends_on_task=depends_on, type=dep_type, created_by=created_by
         )
 
     @staticmethod
+    @transaction.atomic
     def grant_guest_access(task: Task, user: User, granted_by: User) -> TaskGuestAccess:
         access, _ = TaskGuestAccess.objects.get_or_create(
             task=task, user=user, defaults={"granted_by": granted_by}
@@ -218,6 +245,7 @@ class TaskService:
 
 class CommentService:
     @staticmethod
+    @transaction.atomic
     def add_comment(
         task: Task, author: User, body: dict, parent_comment: Comment | None = None
     ) -> Comment:
@@ -289,6 +317,18 @@ class AccessControlService:
         return True
 
     @staticmethod
+    def can_restore_task(user: User, task: Task) -> bool:
+        """PO/PM (or elevated) may restore a soft-deleted task."""
+        if user.has_elevated_access():
+            return True
+        if not task.is_deleted():
+            return False
+        membership = ProjectMember.objects.filter(project=task.project, user=user).first()
+        if not membership:
+            return False
+        return membership.role in (ProjectRole.PO, ProjectRole.PM)
+
+    @staticmethod
     def can_edit_task(user: User, task: Task) -> bool:
         if user.has_elevated_access():
             return True
@@ -312,14 +352,32 @@ class AccessControlService:
 
         return False
 
+    @staticmethod
+    def workspace_member(user, workspace):
+        from projects.models import WorkspaceMember
+        return WorkspaceMember.objects.filter(workspace=workspace, user=user).first()
+
+    @staticmethod
+    def is_workspace_owner(user, workspace) -> bool:
+        return workspace.owner_id == user.pk
+
+    @staticmethod
+    def is_workspace_admin_or_owner(user, workspace) -> bool:
+        from projects.models import WorkspaceRole
+        if workspace.owner_id == user.pk:
+            return True
+        member = AccessControlService.workspace_member(user, workspace)
+        return member is not None and member.role in (WorkspaceRole.OWNER, WorkspaceRole.ADMIN)
+
 
 # ---------------------------------------------------------------------------
 # AttachmentService
 # ---------------------------------------------------------------------------
 
 class AttachmentService:
+    # SVG is intentionally excluded: it can carry inline <script> tags (XSS).
     ALLOWED_MIME_TYPES = {
-        "image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml",
+        "image/jpeg", "image/png", "image/gif", "image/webp",
         "application/pdf",
         "text/plain", "text/csv",
         "application/zip",
@@ -333,19 +391,39 @@ class AttachmentService:
     MAX_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB
 
     @staticmethod
+    def _detect_mime(file_obj) -> str:
+        """Read the first 2 KB for magic-number detection (python-magic preferred)."""
+        head = file_obj.read(2048)
+        file_obj.seek(0)
+        try:
+            import magic
+            return magic.from_buffer(head, mime=True)
+        except ImportError:
+            pass
+        return ""
+
+    @staticmethod
     @transaction.atomic
     def upload(task: Task, uploaded_file, uploaded_by: User, comment: Comment | None = None) -> Attachment:
         if uploaded_file.size > AttachmentService.MAX_SIZE_BYTES:
             raise ValueError("File exceeds the 50 MB size limit.")
 
-        mime_type = (uploaded_file.content_type or "application/octet-stream").split(";")[0].strip()
+        declared_mime = (uploaded_file.content_type or "application/octet-stream").split(";")[0].strip()
+
+        # Magic-number verification (if python-magic is installed)
+        actual_mime = AttachmentService._detect_mime(uploaded_file)
+        if actual_mime and actual_mime not in AttachmentService.ALLOWED_MIME_TYPES:
+            raise ValueError(f"File content type '{actual_mime}' is not allowed.")
+        if actual_mime and actual_mime != declared_mime:
+            raise ValueError("File content does not match the declared MIME type.")
+
+        mime_type = actual_mime if actual_mime else declared_mime
         if mime_type not in AttachmentService.ALLOWED_MIME_TYPES:
             raise ValueError(f"File type '{mime_type}' is not allowed.")
 
-        # Store under attachments/{task_id}/{uuid}/{original_name} so the last
-        # path segment is the readable filename that browsers use when downloading.
-        safe_name = re.sub(r'[^\w.\-]', '_', uploaded_file.name)[:200] or "file"
-        storage_key = f"attachments/{task.pk}/{_uuid.uuid4()}/{safe_name}"
+        # Use a random UUID as the storage key so task IDs and filenames don't
+        # appear in the URL (prevents enumeration and filename injection).
+        storage_key = f"attachments/{_uuid.uuid4()}"
         default_storage.save(storage_key, uploaded_file)
 
         attachment = Attachment.objects.create(

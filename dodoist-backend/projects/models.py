@@ -12,6 +12,12 @@ class WorkspacePlan(models.TextChoices):
     BUSINESS = "business", "Business"
 
 
+class WorkspaceRole(models.TextChoices):
+    OWNER = "OWNER", "Owner"
+    ADMIN = "ADMIN", "Admin"
+    MEMBER = "MEMBER", "Member"
+
+
 class ProjectStatus(models.TextChoices):
     ACTIVE = "active", "Active"
     ARCHIVED = "archived", "Archived"
@@ -66,18 +72,35 @@ class Workspace(models.Model):
     is_personal = models.BooleanField(default=False)
     created_at = models.DateTimeField(default=tz.now)
     updated_at = models.DateTimeField(auto_now=True)
+    # Soft-delete
+    deleted_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    deleted_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="deleted_workspaces"
+    )
+    delete_scheduled_for = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "workspaces"
+        indexes = [
+            models.Index(fields=["owner", "is_personal"], name="ws_owner_personal_idx"),
+            models.Index(fields=["delete_scheduled_for"], name="ws_delete_scheduled_idx"),
+        ]
 
     def __str__(self):
         return self.name
+
+    def is_deleted(self) -> bool:
+        return self.deleted_at is not None
 
 
 class WorkspaceMember(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     workspace = models.ForeignKey(Workspace, on_delete=models.CASCADE, related_name="members")
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="workspace_memberships")
+    role = models.CharField(max_length=10, choices=WorkspaceRole.choices, default=WorkspaceRole.MEMBER)
+    invited_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="workspace_invitations_sent"
+    )
     joined_at = models.DateTimeField(default=tz.now)
 
     class Meta:
@@ -85,7 +108,56 @@ class WorkspaceMember(models.Model):
         unique_together = [("workspace", "user")]
 
     def __str__(self):
-        return f"{self.user_id} in {self.workspace_id}"
+        return f"{self.user_id} in {self.workspace_id} as {self.role}"
+
+
+class WorkspaceInvitationKind(models.TextChoices):
+    EMAIL = "email", "Email"
+    LINK = "link", "Link"
+
+
+class WorkspaceInvitation(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    workspace = models.ForeignKey(Workspace, on_delete=models.CASCADE, related_name="invitations")
+    kind = models.CharField(max_length=10, choices=WorkspaceInvitationKind.choices)
+    email = models.EmailField(blank=True, default="")
+    token_hash = models.CharField(max_length=64, unique=True, db_index=True)
+    role_to_grant = models.CharField(max_length=10, choices=WorkspaceRole.choices, default=WorkspaceRole.MEMBER)
+    invited_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="workspace_invites_created"
+    )
+    created_at = models.DateTimeField(default=tz.now)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    max_uses = models.PositiveIntegerField(null=True, blank=True)
+    use_count = models.PositiveIntegerField(default=0)
+    accepted_at = models.DateTimeField(null=True, blank=True)
+    accepted_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="workspace_invites_accepted"
+    )
+    revoked_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "workspace_invitations"
+        indexes = [
+            models.Index(fields=["workspace", "accepted_at", "revoked_at"], name="ws_invite_status_idx"),
+            models.Index(fields=["email"], name="ws_invite_email_idx"),
+        ]
+
+    def __str__(self):
+        return f"Invite({self.kind}, ws={self.workspace_id})"
+
+    def is_expired(self) -> bool:
+        if self.expires_at is None:
+            return False
+        return tz.now() > self.expires_at
+
+    def is_revoked(self) -> bool:
+        return self.revoked_at is not None
+
+    def uses_exhausted(self) -> bool:
+        if self.max_uses is None:
+            return False
+        return self.use_count >= self.max_uses
 
 
 class Project(models.Model):
@@ -107,6 +179,9 @@ class Project(models.Model):
     class Meta:
         db_table = "projects"
         unique_together = [("workspace", "key")]
+        indexes = [
+            models.Index(fields=["workspace", "status"], name="project_workspace_status_idx"),
+        ]
 
     def __str__(self):
         return f"{self.key} — {self.name}"

@@ -88,6 +88,15 @@ class TaskCreateSerializer(serializers.Serializer):
     priority = serializers.ChoiceField(choices=TaskPriority.choices, default=TaskPriority.NONE)
     status = serializers.ChoiceField(choices=TaskStatus.choices, required=False)
     description = serializers.JSONField(required=False, allow_null=True)
+
+    def validate_description(self, value):
+        if value is None:
+            return value
+        from tasks.prosemirror import sanitize
+        sanitized = sanitize(value)
+        if sanitized is None:
+            raise serializers.ValidationError("Invalid ProseMirror document structure.")
+        return sanitized
     assigned_to_id = serializers.UUIDField(required=False, allow_null=True)
     sprint_id = serializers.UUIDField(required=False, allow_null=True)
     board_column_id = serializers.UUIDField(required=False, allow_null=True)
@@ -178,6 +187,15 @@ class TaskUpdateSerializer(serializers.Serializer):
     start_date = serializers.DateTimeField(required=False, allow_null=True)
     reminder_at = serializers.DateTimeField(required=False, allow_null=True)
     is_private = serializers.BooleanField(required=False)
+
+    def validate_description(self, value):
+        if value is None:
+            return value
+        from tasks.prosemirror import sanitize
+        sanitized = sanitize(value)
+        if sanitized is None:
+            raise serializers.ValidationError("Invalid ProseMirror document structure.")
+        return sanitized
 
     def validate_assigned_to_id(self, value):
         if value is None:
@@ -435,9 +453,23 @@ class CommentCreateSerializer(serializers.Serializer):
     body = serializers.JSONField()
     parent_comment_id = serializers.UUIDField(required=False, allow_null=True)
 
+    def validate_body(self, value):
+        from tasks.prosemirror import sanitize
+        sanitized = sanitize(value)
+        if sanitized is None:
+            raise serializers.ValidationError("Invalid ProseMirror document structure.")
+        return sanitized
+
 
 class CommentUpdateSerializer(serializers.Serializer):
     body = serializers.JSONField()
+
+    def validate_body(self, value):
+        from tasks.prosemirror import sanitize
+        sanitized = sanitize(value)
+        if sanitized is None:
+            raise serializers.ValidationError("Invalid ProseMirror document structure.")
+        return sanitized
 
 
 # ---------------------------------------------------------------------------
@@ -562,9 +594,8 @@ class AttachmentSerializer(serializers.ModelSerializer):
         fields = ["id", "filename", "file_size_bytes", "mime_type", "download_url", "uploaded_by", "created_at"]
 
     def get_download_url(self, obj):
-        from django.core.files.storage import default_storage
         request = self.context.get("request")
-        url = default_storage.url(obj.storage_key)
+        path = f"/api/attachments/{obj.pk}/download/"
         if request:
-            return request.build_absolute_uri(url)
-        return url
+            return request.build_absolute_uri(path)
+        return path

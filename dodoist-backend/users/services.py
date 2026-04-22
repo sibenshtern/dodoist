@@ -39,13 +39,24 @@ class NotificationService:
             task_id=task_id,
             project_id=project_id,
         )
-        try:
-            prefs = recipient.preferences
-            if prefs.notification_channels.get("email"):
-                from users.tasks import send_email_notification
-                send_email_notification.delay(str(notif.pk))
-        except UserPreferences.DoesNotExist:
-            pass
+        user_id = str(recipient.pk)
+        notif_pk = str(notif.pk)
+
+        def _on_commit():
+            # Push real-time SSE event to all open connections for this user.
+            from realtime.channels import publish
+            publish(user_id, {"type": "notification", "id": notif_pk})
+
+            # Email delivery via Celery (respects email channel preference).
+            try:
+                prefs = recipient.preferences
+                if prefs.notification_channels.get("email"):
+                    from users.tasks import send_email_notification
+                    send_email_notification.delay(notif_pk)
+            except UserPreferences.DoesNotExist:
+                pass
+
+        transaction.on_commit(_on_commit)
         return notif
 
     @staticmethod
@@ -102,7 +113,13 @@ class NotificationService:
 class UserService:
     @staticmethod
     @transaction.atomic
-    def register(email: str, password: str, display_name: str, user_timezone: str = "UTC") -> User:
+    def register(
+        email: str,
+        password: str,
+        display_name: str,
+        user_timezone: str = "UTC",
+        invite_token: str | None = None,
+    ) -> User:
         if User.objects.filter(email=email).exists():
             raise ValueError(f"User with email '{email}' already exists.")
 
@@ -120,6 +137,26 @@ class UserService:
         from projects.services import WorkspaceService  # deferred to avoid circular import
         WorkspaceService.create_personal_workspace(user)
 
+        if invite_token:
+            try:
+                from projects.invitations import InvitationService
+                InvitationService.accept(invite_token, user)
+            except Exception:
+                pass  # invite failure must not block signup
+
+        return user
+
+    @staticmethod
+    def set_active_workspace(user: User, workspace) -> User:
+        from projects.models import WorkspaceMember
+        is_member = (
+            workspace.owner_id == user.pk
+            or WorkspaceMember.objects.filter(workspace=workspace, user=user).exists()
+        )
+        if not is_member:
+            raise ValueError("User is not a member of this workspace.")
+        user.active_workspace = workspace
+        user.save(update_fields=["active_workspace"])
         return user
 
     @staticmethod
@@ -188,7 +225,8 @@ class UserService:
         token = secrets.token_urlsafe(32)
         token_hash = hashlib.sha256(token.encode()).hexdigest()
         user.verification_token_hash = token_hash
-        user.save(update_fields=["verification_token_hash"])
+        user.verification_token_expires_at = timezone.now() + timezone.timedelta(hours=24)
+        user.save(update_fields=["verification_token_hash", "verification_token_expires_at"])
         from users.tasks import send_verification_email as task
         task.delay(str(user.pk), token)
 
@@ -199,9 +237,18 @@ class UserService:
             user = User.objects.get(verification_token_hash=token_hash, is_active=True)
         except User.DoesNotExist:
             raise ValueError("Invalid or expired verification token.")
+        if (
+            user.verification_token_expires_at
+            and timezone.now() > user.verification_token_expires_at
+        ):
+            raise ValueError("Verification token has expired. Please request a new one.")
         user.email_verified = True
         user.verification_token_hash = ""
-        user.save(update_fields=["email_verified", "verification_token_hash", "updated_at"])
+        user.verification_token_expires_at = None
+        user.save(update_fields=[
+            "email_verified", "verification_token_hash",
+            "verification_token_expires_at", "updated_at",
+        ])
         return user
 
     # ── Password reset ────────────────────────────────────────────────────────

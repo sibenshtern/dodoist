@@ -2,6 +2,7 @@ from django.urls import path
 
 from .views import (
     AttachmentDetailView,
+    AttachmentDownloadView,
     CommentDetailView,
     CommentReactionView,
     DashboardStatsView,
@@ -100,4 +101,5 @@ urlpatterns = [
     # Attachments
     path("api/tasks/<uuid:pk>/attachments/", TaskAttachmentListCreateView.as_view(), name="task-attachments"),
     path("api/attachments/<uuid:pk>/", AttachmentDetailView.as_view(), name="attachment-detail"),
+    path("api/attachments/<uuid:pk>/download/", AttachmentDownloadView.as_view(), name="attachment-download"),
 ]

@@ -1,0 +1,1392 @@
+================================================================================
+  TASK TRACKER REST API — MACHINE-READABLE DESCRIPTION v1.0
+  For use by language models and automated tooling
+================================================================================
+
+BASE URL
+--------
+  https://api.tasktracker.io/v1
+
+AUTHENTICATION
+--------------
+  All endpoints (except POST /auth/register and POST /auth/login) require a
+  Bearer token in the Authorization header:
+    Authorization: Bearer <access_token>
+
+  Access tokens are JWT, expire in 15 minutes.
+  Refresh tokens expire in 30 days and are returned at login.
+
+PASSWORD SECURITY
+-----------------
+  Passwords are NEVER transmitted in request bodies to prevent capture in
+  application logs, error traces, and proxy caches.
+
+  | Operation       | Mechanism                                                     |
+  |-----------------|---------------------------------------------------------------|
+  | Login           | HTTP Basic Auth: Authorization: Basic base64(email:password) |
+  | Register        | X-Password request header                                    |
+  | Change password | X-Current-Password + X-New-Password request headers          |
+
+  All API communication must use HTTPS/TLS.
+
+PERMISSION MODEL
+----------------
+  Global roles (stored in users.global_role):
+    SA  — System Administrator: full unrestricted access to everything
+    GA  — Global Admin: can create/configure projects, assign roles, no delete
+    member — default, permissions determined by project role
+
+  Project roles (stored in project_members.role per project):
+    PO  — Project Owner: full control within the project
+    PM  — Project Manager: manages workflow, tasks, sprints; no member mgmt
+    DEV — Developer: creates/edits own tasks, logs work
+    VW  — Viewer: read-only + comments
+    GU  — Guest: view only explicitly shared tasks
+
+  Permission checks happen in order:
+    1. Check users.global_role (SA/GA bypass project checks)
+    2. Check project_members.role for the relevant project
+    3. For DEV edit: check tasks.created_by or task_assignments
+
+PAGINATION
+----------
+  All list endpoints support cursor-based pagination:
+    Query params: limit (int, default 20, max 100), cursor (string, opaque)
+  Response envelope for lists:
+    { "data": [...], "meta": { "total": int, "limit": int, "next_cursor": string|null } }
+
+ERROR FORMAT
+------------
+  All errors return:
+    { "error": { "code": "ERROR_CODE", "message": "Human-readable", "details": {} } }
+  HTTP status codes: 400 Bad Request, 401 Unauthorized, 403 Forbidden,
+                     404 Not Found, 409 Conflict, 422 Unprocessable Entity, 500 Internal Error
+
+COMMON FIELD TYPES
+------------------
+  id: UUID v4
+  timestamps: ISO 8601 (e.g. "2024-03-15T10:30:00Z")
+  dates: ISO 8601 date only (e.g. "2024-03-15")
+
+================================================================================
+  DOMAIN 1 — AUTHENTICATION
+================================================================================
+
+SECURITY NOTES FOR AUTH ENDPOINTS
+  - POST /auth/login and POST /auth/register are rate-limited independently of
+    the global per-user limit (see RATE LIMITS section).
+  - Login responses are timing-constant for wrong-password vs unknown-email to
+    prevent account enumeration. Both return 401.
+  - Accounts are created in pending_verification state. Full API access is
+    blocked until email is confirmed via POST /auth/verify-email.
+  - JWTs are signed with RS256 only. The server rejects tokens with any other
+    alg value, including "none". Public keys available at GET /.well-known/jwks.json.
+  - Refresh tokens are rotated on every use (old token invalidated immediately).
+    Reuse of a superseded refresh token triggers family invalidation + user alert.
+
+POST /auth/register
+  Description: Register a new user account. Creates a personal workspace automatically.
+    Account is created in pending_verification state; tokens are NOT issued until
+    the user completes email verification via POST /auth/verify-email.
+    A verification email is sent to the provided address. Link expires in 24 h.
+    Password is transmitted in the X-Password header instead of the request body to
+    prevent it from appearing in application logs, error traces, or proxy caches.
+    All communication must occur over HTTPS/TLS.
+    Rate limit: 10 registrations per IP per hour.
+  Auth required: No
+  Headers:
+    X-Password (string, required) — min 8, max 128 chars; kept out of body to avoid log capture
+  Request body:
+    email (string, required) — valid email address
+    display_name (string, required) — 1-100 chars, max 100
+    timezone (string, optional, default "UTC") — IANA timezone name
+  Response 202:
+    { "message": "Verification email sent. Please check your inbox." }
+    Note: 202 Accepted (not 201) — account exists but is not yet active.
+  Error 409: email already registered (timing-safe; delay response to match 202 timing)
+  Error 422: validation failure
+  Error 429: rate limit exceeded; includes Retry-After header
+  Example request:
+    POST /auth/register
+    Headers: X-Password: s3cur3pass!
+    Body: { "email": "alice@example.com", "display_name": "Alice Smith" }
+
+POST /auth/verify-email
+  Description: Activate a newly registered account using the token from the verification email.
+    On success, the account becomes active and JWT tokens are issued.
+  Auth required: No
+  Headers:
+    X-Verification-Token (string, required) — single-use token from the verification email
+  Request body: none
+  Response 200:
+    { "user": { id, email, display_name, global_role, created_at },
+      "access_token": string, "refresh_token": string }
+  Error 400: token expired (> 24 h) or already used — code INVALID_VERIFICATION_TOKEN
+  Example request:
+    POST /auth/verify-email
+    Headers: X-Verification-Token: abc123def456...
+
+POST /auth/resend-verification
+  Description: Re-send the verification email for a pending account.
+  Auth required: No
+  Rate limit: 3 requests per email per hour
+  Request body:
+    email (string, required)
+  Response 200: { "message": "Verification email re-sent." }
+    Note: Always 200 regardless of whether the email has a pending account (prevents enumeration)
+  Error 429: rate limit exceeded
+
+POST /auth/login
+  Description: Authenticate with credentials and return JWT tokens.
+    Uses HTTP Basic Authentication: credentials are base64-encoded and passed in the
+    Authorization header as "Basic base64(email:password)". This prevents the password
+    from entering the request body, which is frequently written to application logs
+    and captured by intermediary proxy caches.
+    All communication must occur over HTTPS/TLS.
+    Rate limit: 5 failed attempts per email per 15 minutes. After limit is reached,
+    returns 429 with Retry-After. Successful login resets the counter.
+    Wrong password and unknown email both return identical 401 responses with
+    identical timing to prevent account enumeration.
+  Auth required: No — uses HTTP Basic Auth header
+  Headers:
+    Authorization (string, required) — "Basic base64(email:password)"
+      Example: alice@example.com:s3cur3pass! → Authorization: Basic YWxpY2VA...
+  Request body: none
+  Response 200:
+    { "access_token": string, "refresh_token": string,
+      "user": { id, email, display_name, global_role } }
+  Error 401: invalid credentials (timing-constant — same response for wrong password and unknown email)
+  Error 403: account is pending email verification — code EMAIL_NOT_VERIFIED
+  Error 429: rate limit exceeded; includes Retry-After header
+  Example request:
+    POST /auth/login
+    Authorization: Basic YWxpY2VAZXhhbXBsZS5jb206czNjdXIzcGFzcyE=
+
+POST /auth/logout
+  Description: Revoke the current session token and optionally invalidate a refresh token.
+  Auth required: Yes
+  Request body (optional):
+    refresh_token (string, optional) — refresh token to revoke immediately;
+                                       prevents reuse of the token after logout;
+                                       omitting this field only revokes the access token
+  Response 204: empty
+  Error 401: invalid or expired access token
+  Example: POST /auth/logout  (with Authorization header)
+
+POST /auth/refresh
+  Description: Exchange a refresh token for a new access/refresh token pair.
+    The submitted refresh token is IMMEDIATELY INVALIDATED after use (token rotation).
+    If a previously-used (superseded) refresh token is submitted, the entire token
+    family is invalidated and the user receives a security alert notification.
+    This detects token theft: if an attacker uses a stolen token before the legitimate
+    user, the legitimate user's next refresh call triggers family revocation.
+  Auth required: No
+  Rate limit: 10 requests per refresh_token family per minute
+  Request body:
+    refresh_token (string, required)
+  Response 200:
+    { "access_token": string, "refresh_token": string }
+    Note: the returned refresh_token is a NEW token; the submitted one is now invalid.
+  Error 401: token expired or not found — code INVALID_REFRESH_TOKEN
+  Error 409: token reuse detected; all sessions invalidated — code REFRESH_TOKEN_REUSE
+
+POST /auth/forgot-password
+  Description: Initiate a password reset flow. Sends a signed, single-use reset token
+    to the user's verified email address. The token expires in 1 hour.
+    ALWAYS returns 200 regardless of whether the email exists — prevents enumeration.
+  Auth required: No
+  Rate limit: 3 requests per email per hour
+  Request body:
+    email (string, required)
+  Response 200: { "message": "If that email is registered, a reset link has been sent." }
+  Error 429: rate limit exceeded
+
+POST /auth/reset-password
+  Description: Complete a password reset using the token from the reset email.
+    On success, the new password is set and ALL existing sessions are invalidated.
+    The reset token is single-use and expires after 1 hour.
+    The new password is transmitted in a header (not body) following the same
+    rationale as all other password fields.
+  Auth required: No
+  Headers:
+    X-Reset-Token (string, required) — single-use token from the reset email
+    X-New-Password (string, required) — new password, min 8, max 128 chars
+  Request body: none
+  Response 200: { "message": "Password updated. All sessions have been revoked." }
+  Error 400: token expired or already used — code INVALID_RESET_TOKEN
+  Error 422: new password does not meet requirements
+
+================================================================================
+  DOMAIN 2 — USERS
+================================================================================
+
+GET /users
+  Description: List all users. SA/GA only.
+  Auth required: Yes (SA or GA)
+  Query params:
+    limit (int, default 20) — page size
+    cursor (string) — pagination cursor
+    search (string) — filter by display_name or email substring
+    is_active (bool) — filter by account status
+  Response 200: paginated list of user objects
+  Example: GET /users?search=alice&is_active=true
+
+GET /users/me
+  Description: Get the profile of the currently authenticated user.
+  Auth required: Yes
+  Response 200: full user object with preferences
+  Example: GET /users/me
+
+GET /users/{userId}
+  Description: Get a user profile by ID. SA/GA can view any user; members can view workspace members.
+  Auth required: Yes
+  Path params:
+    userId (uuid, required) — user identifier
+  Response 200: user object (id, email, display_name, avatar_url, timezone, global_role, is_active, created_at)
+  Example: GET /users/550e8400-e29b-41d4-a716-446655440000
+
+PATCH /users/{userId}
+  Description: Update user profile. Users can update their own; SA can update any.
+    To change a password, supply X-Current-Password and X-New-Password headers.
+    Passwords are kept out of the request body to prevent capture in logs.
+    The global_role field can ONLY be set by SA. GA and below receive 403 if they
+    include global_role in the body, even when editing their own profile.
+  Auth required: Yes (own account or SA)
+  Path params:
+    userId (uuid, required)
+  Headers (only when changing password):
+    X-Current-Password (string) — existing password; required unless caller is SA
+    X-New-Password (string, min 8 chars) — new password to set
+  Request body (all optional):
+    display_name (string, max 100 chars)
+    avatar_url (string) — must be an https:// URL pointing to an approved CDN domain.
+                          The server does NOT fetch this URL; it is stored as-is.
+                          Preferred alternative: upload via POST /users/{userId}/avatar
+                          to receive a canonical CDN URL.
+    timezone (string)
+    global_role (string, SA only) — "SA" | "GA" | "member"
+  Response 200: updated user object
+  Error 403: caller is not SA but included global_role — code INSUFFICIENT_ROLE
+  Example (profile update only):
+    PATCH /users/550e8400-e29b-41d4-a716-446655440000
+    { "display_name": "Alice Johnson", "timezone": "Europe/Berlin" }
+  Example (password change):
+    PATCH /users/550e8400-e29b-41d4-a716-446655440000
+    Headers: X-Current-Password: old_pass  X-New-Password: new_pass123
+    Body: {}
+
+DELETE /users/{userId}
+  Description: Deactivate (soft-delete) a user. SA only.
+  Auth required: Yes (SA)
+  Path params:
+    userId (uuid, required)
+  Response 204: empty
+  Example: DELETE /users/550e8400-e29b-41d4-a716-446655440000
+
+GET /users/{userId}/sessions
+  Description: List all active sessions for a user. Own account or SA only.
+    Returns enough information for the user to identify and revoke unfamiliar sessions.
+  Auth required: Yes (own account or SA)
+  Path params:
+    userId (uuid, required)
+  Response 200: array of session objects { id, device_info, ip_address, created_at, last_used_at }
+  Example: GET /users/me/sessions
+
+DELETE /users/{userId}/sessions
+  Description: Revoke all active sessions for a user (logout from all devices).
+    Triggered automatically on password reset. Own account or SA.
+  Auth required: Yes (own account or SA)
+  Path params:
+    userId (uuid, required)
+  Query params:
+    except_current (bool, default true) — keep the caller's current session alive
+  Response 200: { "revoked_count": int }
+  Example: DELETE /users/me/sessions?except_current=true
+
+GET /users/{userId}/preferences
+  Description: Get notification and UI preferences for a user.
+  Auth required: Yes (own account or SA)
+  Path params:
+    userId (uuid, required)
+  Response 200: preferences object (theme, language, notification_channels, digest_frequency, default_view)
+  Example: GET /users/me/preferences
+
+PUT /users/{userId}/preferences
+  Description: Replace all user preferences. Omitted fields reset to defaults.
+  Auth required: Yes (own account or SA)
+  Path params:
+    userId (uuid, required)
+  Request body:
+    theme (string, optional) — "light" | "dark" | "system"
+    language (string, optional) — ISO 639-1 code, default "en"
+    notification_channels (array, optional) — ["email", "push", "in_app"]
+    digest_frequency (string, optional) — "realtime" | "daily" | "weekly"
+    default_view (string, optional) — "list" | "board" | "calendar"
+  Response 200: updated preferences object
+  Example:
+    PUT /users/me/preferences
+    { "theme": "dark", "notification_channels": ["email", "in_app"], "digest_frequency": "daily" }
+
+================================================================================
+  DOMAIN 3 — WORKSPACES
+================================================================================
+
+GET /workspaces
+  Description: List workspaces the current user belongs to.
+  Auth required: Yes
+  Query params:
+    limit, cursor — pagination
+    is_personal (bool) — filter personal vs shared workspaces
+  Response 200: paginated list of workspace objects
+  Example: GET /workspaces?is_personal=false
+
+POST /workspaces
+  Description: Create a new shared workspace.
+  Auth required: Yes
+  Request body:
+    name (string, required) — workspace name
+    slug (string, required) — unique URL slug (lowercase, letters/numbers/hyphens)
+    description (string, optional)
+    plan (string, optional, default "free") — "free" | "pro" | "business"
+  Response 201: created workspace object
+  Example:
+    POST /workspaces
+    { "name": "Acme Corp", "slug": "acme-corp", "plan": "pro" }
+
+GET /workspaces/{workspaceId}
+  Description: Get a workspace by ID.
+  Auth required: Yes (workspace member or SA/GA)
+  Path params:
+    workspaceId (uuid, required)
+  Response 200: workspace object with member count
+  Example: GET /workspaces/wsp_123
+
+PATCH /workspaces/{workspaceId}
+  Description: Update workspace settings. Workspace owner or SA only.
+  Auth required: Yes (workspace owner or SA)
+  Path params:
+    workspaceId (uuid, required)
+  Request body (all optional):
+    name (string)
+    description (string)
+    plan (string)
+  Response 200: updated workspace object
+  Example:
+    PATCH /workspaces/wsp_123
+    { "name": "Acme Corporation", "plan": "business" }
+
+DELETE /workspaces/{workspaceId}
+  Description: Delete a workspace and all its projects. SA only.
+  Auth required: Yes (SA)
+  Path params:
+    workspaceId (uuid, required)
+  Response 204: empty
+
+GET /workspaces/{workspaceId}/members
+  Description: List all members of a workspace.
+  Auth required: Yes (workspace member)
+  Path params:
+    workspaceId (uuid, required)
+  Query params:
+    limit, cursor — pagination
+    search (string) — filter by name or email
+  Response 200: paginated list of { user, joined_at }
+  Example: GET /workspaces/wsp_123/members
+
+POST /workspaces/{workspaceId}/members
+  Description: Add a user to a workspace. SA/GA or workspace owner.
+  Auth required: Yes (SA, GA, or workspace owner)
+  Path params:
+    workspaceId (uuid, required)
+  Request body:
+    user_id (uuid, required) — user to add
+  Response 201: { user, workspace_id, joined_at }
+  Example:
+    POST /workspaces/wsp_123/members
+    { "user_id": "usr_456" }
+
+DELETE /workspaces/{workspaceId}/members/{userId}
+  Description: Remove a user from a workspace (also removes from all projects).
+  Auth required: Yes (SA, GA, or workspace owner)
+  Path params:
+    workspaceId (uuid, required)
+    userId (uuid, required)
+  Response 204: empty
+
+================================================================================
+  DOMAIN 4 — PROJECTS
+================================================================================
+
+GET /workspaces/{workspaceId}/projects
+  Description: List all projects in a workspace visible to the current user.
+  Auth required: Yes (workspace member)
+  Path params:
+    workspaceId (uuid, required)
+  Query params:
+    limit, cursor — pagination
+    status (string) — "active" | "archived" | "deleted"
+    type (string) — "scrum" | "kanban" | "personal"
+    search (string) — filter by name or key
+  Response 200: paginated list of project objects
+  Example: GET /workspaces/wsp_123/projects?status=active&type=scrum
+
+POST /workspaces/{workspaceId}/projects
+  Description: Create a new project in a workspace. SA, GA, or workspace member (becomes PO).
+  Auth required: Yes (SA, GA, or workspace member)
+  Path params:
+    workspaceId (uuid, required)
+  Request body:
+    name (string, required) — project name
+    key (string, required) — short code, 2-10 uppercase letters/numbers, unique in workspace
+    type (string, required) — "scrum" | "kanban" | "personal"
+    description (string, optional)
+    color (string, optional) — hex color code
+    is_private (bool, optional, default false)
+  Response 201: created project object; creator is assigned PO role
+  Example:
+    POST /workspaces/wsp_123/projects
+    { "name": "Backend API", "key": "BAPI", "type": "scrum", "color": "#4A90E2" }
+
+GET /projects/{projectId}
+  Description: Get a project by ID.
+  Auth required: Yes (project member or SA/GA)
+  Path params:
+    projectId (uuid, required)
+  Response 200: project object with member count and active sprint info
+  Example: GET /projects/proj_789
+
+PATCH /projects/{projectId}
+  Description: Update project settings. PO, PM, SA, or GA.
+  Auth required: Yes (PO, PM, SA, GA)
+  Path params:
+    projectId (uuid, required)
+  Request body (all optional):
+    name (string)
+    description (string)
+    color (string)
+    icon_url (string) — must be an https:// URL (http:// and other schemes are rejected)
+    is_private (bool)
+  Response 200: updated project object
+  Example:
+    PATCH /projects/proj_789
+    { "name": "Backend API v2", "color": "#E24A4A" }
+
+DELETE /projects/{projectId}
+  Description: Permanently delete a project (sets status=deleted). PO or SA.
+  Auth required: Yes (PO or SA)
+  Path params:
+    projectId (uuid, required)
+  Response 204: empty
+
+POST /projects/{projectId}/archive
+  Description: Archive a project (sets status=archived). PO or SA.
+  Auth required: Yes (PO or SA)
+  Path params:
+    projectId (uuid, required)
+  Response 200: updated project object with archived_at timestamp
+  Example: POST /projects/proj_789/archive
+
+POST /projects/{projectId}/unarchive
+  Description: Restore an archived project to active status.
+  Auth required: Yes (PO or SA)
+  Path params:
+    projectId (uuid, required)
+  Response 200: updated project object
+
+GET /projects/{projectId}/members
+  Description: List all members of a project with their roles.
+  Auth required: Yes (project member or SA/GA)
+  Path params:
+    projectId (uuid, required)
+  Query params:
+    limit, cursor — pagination
+    role (string) — filter by role: "PO" | "PM" | "DEV" | "VW" | "GU"
+  Response 200: paginated list of { user, role, joined_at }
+  Example: GET /projects/proj_789/members?role=DEV
+
+POST /projects/{projectId}/members
+  Description: Add a user to a project with a role. PO or SA.
+  Auth required: Yes (PO or SA)
+  Path params:
+    projectId (uuid, required)
+  Request body:
+    user_id (uuid, required) — must be a workspace member first
+    role (string, required) — "PO" | "PM" | "DEV" | "VW" | "GU"
+  Response 201: project member object
+  Example:
+    POST /projects/proj_789/members
+    { "user_id": "usr_456", "role": "DEV" }
+
+PATCH /projects/{projectId}/members/{userId}
+  Description: Change a member's role in a project. PO or SA.
+  Auth required: Yes (PO or SA)
+  Path params:
+    projectId (uuid, required)
+    userId (uuid, required)
+  Request body:
+    role (string, required) — new role
+  Response 200: updated project member object
+  Example:
+    PATCH /projects/proj_789/members/usr_456
+    { "role": "PM" }
+
+DELETE /projects/{projectId}/members/{userId}
+  Description: Remove a user from a project. PO or SA.
+  Auth required: Yes (PO or SA)
+  Path params:
+    projectId (uuid, required)
+    userId (uuid, required)
+  Response 204: empty
+
+================================================================================
+  DOMAIN 5 — LABELS
+================================================================================
+
+GET /workspaces/{workspaceId}/labels
+  Description: List all labels in a workspace.
+  Auth required: Yes (workspace member)
+  Path params:
+    workspaceId (uuid, required)
+  Query params:
+    limit, cursor — pagination
+    search (string) — filter by name
+  Response 200: paginated list of label objects
+  Example: GET /workspaces/wsp_123/labels
+
+POST /workspaces/{workspaceId}/labels
+  Description: Create a new label in a workspace.
+  Auth required: Yes (workspace member)
+  Path params:
+    workspaceId (uuid, required)
+  Request body:
+    name (string, required) — unique within workspace
+    color (string, required) — hex color code (e.g. "#FF5733")
+  Response 201: created label object
+  Example:
+    POST /workspaces/wsp_123/labels
+    { "name": "urgent", "color": "#FF5733" }
+
+PATCH /workspaces/{workspaceId}/labels/{labelId}
+  Description: Update a label's name or color.
+  Auth required: Yes (workspace member who created it, or SA/GA)
+  Path params:
+    workspaceId (uuid, required)
+    labelId (uuid, required)
+  Request body (all optional):
+    name (string)
+    color (string)
+  Response 200: updated label object
+
+DELETE /workspaces/{workspaceId}/labels/{labelId}
+  Description: Delete a label (removes from all tasks).
+  Auth required: Yes (workspace owner, SA, GA)
+  Path params:
+    workspaceId (uuid, required)
+    labelId (uuid, required)
+  Response 204: empty
+
+================================================================================
+  DOMAIN 6 — TASKS
+================================================================================
+
+GET /projects/{projectId}/tasks
+  Description: List tasks in a project with filtering and sorting.
+  Auth required: Yes (project member)
+  Path params:
+    projectId (uuid, required)
+  Query params:
+    limit, cursor — pagination
+    status (string) — comma-separated: "backlog,todo,in_progress,in_review,done,cancelled"
+    priority (string) — comma-separated: "critical,high,medium,low,none"
+    type (string) — comma-separated: "task,bug,story,epic,personal"
+    assigned_to (uuid) — filter by assignee user ID
+    sprint_id (uuid) — filter by sprint
+    label_ids (string) — comma-separated label UUIDs
+    due_before (date) — ISO date
+    due_after (date) — ISO date
+    search (string) — full-text search in title and description
+    parent_task_id (uuid) — get subtasks of a specific task (pass "null" for top-level only)
+    sort_by (string) — "created_at" | "updated_at" | "due_date" | "priority" | "position"
+    sort_dir (string) — "asc" | "desc"
+    include_private (bool) — include private tasks (own or assigned, default true)
+  Response 200: paginated list of task objects
+  Example: GET /projects/proj_789/tasks?status=in_progress&assigned_to=usr_456&sort_by=due_date
+
+POST /projects/{projectId}/tasks
+  Description: Create a new task in a project. DEV and above.
+    CROSS-PROJECT VALIDATION: all foreign-key UUID fields must reference resources
+    belonging to this project (same project_id). Validated fields: parent_task_id,
+    sprint_id, board_column_id. Responds 422 CROSS_PROJECT_REFERENCE if violated.
+    ASSIGNEE VALIDATION: assigned_to must be a member of the project.
+    Responds 422 ASSIGNEE_NOT_PROJECT_MEMBER if violated.
+    PROSEMIRROR VALIDATION: description is validated against the allowed schema;
+    disallowed node types are rejected with 422 INVALID_DOCUMENT_SCHEMA.
+  Auth required: Yes (DEV, PM, PO, SA, GA)
+  Path params:
+    projectId (uuid, required)
+  Request body:
+    title (string, required) — 1-500 chars
+    type (string, required) — "task" | "bug" | "story" | "epic" | "personal"
+    description (object, optional) — ProseMirror JSON document; server-validated schema
+    status (string, optional, default "backlog") — task status enum
+    priority (string, optional, default "none") — priority enum
+    assigned_to (uuid, optional) — must be a project member
+    parent_task_id (uuid, optional) — must belong to the same project
+    sprint_id (uuid, optional) — must belong to the same project
+    board_column_id (uuid, optional) — must belong to a board in the same project
+    story_points (int, optional) — estimation points
+    due_date (datetime, optional) — ISO 8601
+    start_date (datetime, optional)
+    reminder_at (datetime, optional)
+    is_private (bool, optional, default false)
+    label_ids (array of uuid, optional) — must be from the same workspace
+  Response 201: created task object
+  Error 422: CROSS_PROJECT_REFERENCE, ASSIGNEE_NOT_PROJECT_MEMBER, INVALID_DOCUMENT_SCHEMA
+  Example:
+    POST /projects/proj_789/tasks
+    { "title": "Implement OAuth login", "type": "story", "priority": "high",
+      "assigned_to": "usr_456", "sprint_id": "spr_101", "story_points": 5 }
+
+GET /tasks/{taskId}
+  Description: Get full details of a single task including subtasks count and assignees.
+    AUTHORIZATION CHAIN: server resolves tasks.project_id → project_members to verify
+    the caller belongs to the owning project. Returns 404 (not 403) when the task exists
+    but the caller has no project membership — to avoid confirming the task's existence.
+    Also returns 404 for soft-deleted tasks (deleted_at IS NOT NULL) unless caller is SA or PO.
+  Auth required: Yes (project member; GU requires task_guest_access entry)
+  Path params:
+    taskId (uuid, required)
+  Response 200: full task object with additional fields:
+    assignees (array) — all assignees including primary
+    labels (array) — attached labels
+    subtasks_count (int)
+    dependencies (array)
+    custom_field_values (array)
+  Error 404: task not found OR caller not in owning project (intentionally ambiguous)
+  Example: GET /tasks/tsk_001
+
+PATCH /tasks/{taskId}
+  Description: Update task fields. DEV can only edit own tasks; PM/PO/SA/GA can edit any.
+    CROSS-PROJECT VALIDATION: all foreign-key fields are validated to belong to the
+    same project as the task:
+      - sprint_id: the sprint must belong to the same project
+      - board_column_id: the column's board must belong to the same project
+      - parent_task_id: the parent task must belong to the same project
+      - assigned_to: must be a member of the project (422 ASSIGNEE_NOT_PROJECT_MEMBER if not)
+    AUTHORIZATION CHAIN: resolves tasks.project_id → project_members before accepting edit.
+  Auth required: Yes (DEV for own tasks, PM/PO/SA/GA for any task)
+  Path params:
+    taskId (uuid, required)
+  Request body (all optional, send only fields to change):
+    title (string, max 500 chars)
+    description (object) — ProseMirror JSON; server validates schema and strips disallowed nodes
+    status (string)
+    priority (string)
+    assigned_to (uuid) — must be a project member
+    sprint_id (uuid) — must belong to same project; null to remove from sprint
+    board_column_id (uuid) — must belong to same project's board; null to remove from board
+    story_points (int)
+    due_date (datetime)
+    start_date (datetime)
+    reminder_at (datetime)
+    position (float) — for reordering
+    is_private (bool)
+  Response 200: updated task object
+  Error 422: CROSS_PROJECT_REFERENCE — referenced resource belongs to a different project
+  Error 422: ASSIGNEE_NOT_PROJECT_MEMBER — assigned_to user is not in the project
+  Example:
+    PATCH /tasks/tsk_001
+    { "status": "in_review", "story_points": 8 }
+
+DELETE /tasks/{taskId}
+  Description: Soft-delete a task (sets deleted_at). PM, PO, SA only.
+  Auth required: Yes (PM, PO, SA)
+  Path params:
+    taskId (uuid, required)
+  Response 204: empty
+
+GET /tasks/{taskId}/subtasks
+  Description: List direct subtasks of a task.
+  Auth required: Yes (project member)
+  Path params:
+    taskId (uuid, required)
+  Query params:
+    limit, cursor — pagination
+    status (string) — filter by status
+  Response 200: paginated list of task objects (subset fields)
+  Example: GET /tasks/tsk_001/subtasks
+
+POST /tasks/{taskId}/assignments
+  Description: Add an additional assignee to a task. DEV and above.
+  Auth required: Yes (DEV, PM, PO, SA, GA)
+  Path params:
+    taskId (uuid, required)
+  Request body:
+    user_id (uuid, required) — must be a project member
+  Response 201: assignment object { task_id, user_id, assigned_by, assigned_at }
+  Example:
+    POST /tasks/tsk_001/assignments
+    { "user_id": "usr_789" }
+
+DELETE /tasks/{taskId}/assignments/{userId}
+  Description: Remove an assignee from a task.
+  Auth required: Yes (DEV for own assignment, PM/PO/SA/GA for any)
+  Path params:
+    taskId (uuid, required)
+    userId (uuid, required)
+  Response 204: empty
+
+POST /tasks/{taskId}/labels
+  Description: Attach a label to a task.
+  Auth required: Yes (DEV for own tasks, PM/PO/SA/GA for any)
+  Path params:
+    taskId (uuid, required)
+  Request body:
+    label_id (uuid, required) — must be from same workspace
+  Response 201: { task_id, label_id }
+  Example:
+    POST /tasks/tsk_001/labels
+    { "label_id": "lbl_555" }
+
+DELETE /tasks/{taskId}/labels/{labelId}
+  Description: Remove a label from a task.
+  Auth required: Yes (DEV for own tasks, PM/PO/SA/GA for any)
+  Path params:
+    taskId (uuid, required)
+    labelId (uuid, required)
+  Response 204: empty
+
+GET /tasks/{taskId}/dependencies
+  Description: List all dependency relationships for a task.
+  Auth required: Yes (project member)
+  Path params:
+    taskId (uuid, required)
+  Response 200: array of dependency objects { id, task_id, depends_on_task_id, type, created_by, created_at }
+  Example: GET /tasks/tsk_001/dependencies
+
+POST /tasks/{taskId}/dependencies
+  Description: Create a dependency between two tasks.
+    SAME-PROJECT VALIDATION: depends_on_task_id must belong to the same project as taskId.
+    Cross-project dependencies are not permitted (422 CROSS_PROJECT_REFERENCE).
+    AUTHORIZATION CHAIN: both tasks are verified to belong to a project the caller is
+    a member of before the dependency is recorded.
+  Auth required: Yes (DEV and above)
+  Path params:
+    taskId (uuid, required)
+  Request body:
+    depends_on_task_id (uuid, required) — must be in the same project as taskId
+    type (string, required) — "blocks" | "is_blocked_by" | "relates_to" | "duplicates" | "is_duplicated_by"
+  Response 201: dependency object
+  Error 422: CROSS_PROJECT_REFERENCE — depends_on_task_id is from a different project
+  Example:
+    POST /tasks/tsk_001/dependencies
+    { "depends_on_task_id": "tsk_002", "type": "blocks" }
+
+DELETE /tasks/{taskId}/dependencies/{dependencyId}
+  Description: Remove a dependency relationship.
+  Auth required: Yes (DEV and above)
+  Path params:
+    taskId (uuid, required)
+    dependencyId (uuid, required)
+  Response 204: empty
+
+GET /tasks/{taskId}/guest-access
+  Description: List guest users with access to this task. PO/PM/SA only.
+  Auth required: Yes (PO, PM, SA)
+  Path params:
+    taskId (uuid, required)
+  Response 200: array of { user, granted_by, granted_at, expires_at }
+
+POST /tasks/{taskId}/guest-access
+  Description: Grant a guest user access to a specific task. PO or SA.
+  Auth required: Yes (PO or SA)
+  Path params:
+    taskId (uuid, required)
+  Request body:
+    user_id (uuid, required) — must have GU role in project
+    expires_at (datetime, optional) — access expiry
+  Response 201: guest access object
+  Example:
+    POST /tasks/tsk_001/guest-access
+    { "user_id": "usr_guest_1", "expires_at": "2024-06-30T23:59:59Z" }
+
+DELETE /tasks/{taskId}/guest-access/{userId}
+  Description: Revoke a guest's access to a task.
+  Auth required: Yes (PO or SA)
+  Path params:
+    taskId (uuid, required)
+    userId (uuid, required)
+  Response 204: empty
+
+================================================================================
+  DOMAIN 7 — CUSTOM FIELDS
+================================================================================
+
+GET /projects/{projectId}/custom-fields
+  Description: List all custom field definitions for a project.
+  Auth required: Yes (project member)
+  Path params:
+    projectId (uuid, required)
+  Response 200: array of custom field objects ordered by position
+  Example: GET /projects/proj_789/custom-fields
+
+POST /projects/{projectId}/custom-fields
+  Description: Define a new custom field for a project. PO, PM, SA, GA.
+  Auth required: Yes (PO, PM, SA, GA)
+  Path params:
+    projectId (uuid, required)
+  Request body:
+    name (string, required) — field label
+    field_type (string, required) — "text" | "number" | "date" | "select" | "multi_select" | "user" | "url"
+    options (array of string, required for select/multi_select) — selectable values
+    is_required (bool, optional, default false)
+    position (int, optional) — display order
+  Response 201: custom field object
+  Example:
+    POST /projects/proj_789/custom-fields
+    { "name": "Environment", "field_type": "select", "options": ["production", "staging", "dev"] }
+
+PATCH /projects/{projectId}/custom-fields/{fieldId}
+  Description: Update a custom field definition.
+  Auth required: Yes (PO, PM, SA, GA)
+  Path params:
+    projectId (uuid, required)
+    fieldId (uuid, required)
+  Request body (all optional):
+    name (string)
+    options (array) — for select types
+    is_required (bool)
+    position (int)
+  Response 200: updated custom field object
+
+DELETE /projects/{projectId}/custom-fields/{fieldId}
+  Description: Delete a custom field and all its values.
+  Auth required: Yes (PO or SA)
+  Path params:
+    projectId (uuid, required)
+    fieldId (uuid, required)
+  Response 204: empty
+
+GET /tasks/{taskId}/custom-field-values
+  Description: Get all custom field values for a task.
+  Auth required: Yes (project member)
+  Path params:
+    taskId (uuid, required)
+  Response 200: array of { custom_field, value, updated_at }
+  Example: GET /tasks/tsk_001/custom-field-values
+
+PUT /tasks/{taskId}/custom-field-values/{fieldId}
+  Description: Set or update a custom field value on a task. DEV for own tasks, PM/PO for any.
+  Auth required: Yes (DEV for own, PM/PO/SA/GA for any)
+  Path params:
+    taskId (uuid, required)
+    fieldId (uuid, required)
+  Request body:
+    value (string, required) — serialized value; for multi_select, JSON array string
+  Response 200: updated custom field value object
+  Example:
+    PUT /tasks/tsk_001/custom-field-values/fld_99
+    { "value": "production" }
+
+================================================================================
+  DOMAIN 8 — COMMENTS
+================================================================================
+
+GET /tasks/{taskId}/comments
+  Description: List comments on a task in threaded order.
+  Auth required: Yes (project member; GU with task access)
+  Path params:
+    taskId (uuid, required)
+  Query params:
+    limit, cursor — pagination
+    parent_comment_id (uuid) — filter replies to specific comment (null for top-level)
+  Response 200: paginated list of comment objects with reaction counts
+  Example: GET /tasks/tsk_001/comments
+
+POST /tasks/{taskId}/comments
+  Description: Post a comment on a task. VW and above, GU with task access.
+  Auth required: Yes (VW, DEV, PM, PO, SA, GA; GU with task access)
+  Path params:
+    taskId (uuid, required)
+  Request body:
+    body (object, required) — ProseMirror JSON document
+    parent_comment_id (uuid, optional) — for threaded replies
+  Response 201: created comment object
+  Example:
+    POST /tasks/tsk_001/comments
+    { "body": { "type": "doc", "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": "LGTM!" }] }] } }
+
+PATCH /comments/{commentId}
+  Description: Edit a comment body. Author only (within 24h), or SA.
+  Auth required: Yes (author or SA)
+  Path params:
+    commentId (uuid, required)
+  Request body:
+    body (object, required) — new ProseMirror JSON document
+  Response 200: updated comment object with is_edited=true
+
+DELETE /comments/{commentId}
+  Description: Soft-delete a comment. Author or PM/PO/SA.
+  Auth required: Yes (author, PM, PO, SA)
+  Path params:
+    commentId (uuid, required)
+  Response 204: empty
+
+POST /comments/{commentId}/reactions
+  Description: Add an emoji reaction to a comment.
+  Auth required: Yes (project member)
+  Path params:
+    commentId (uuid, required)
+  Request body:
+    emoji (string, required) — single emoji character or shortcode (min 1, max 10 chars)
+  Response 201: reaction object; returns 409 if user already reacted with this emoji
+  Example:
+    POST /comments/cmt_001/reactions
+    { "emoji": "👍" }
+
+DELETE /comments/{commentId}/reactions/{emoji}
+  Description: Remove a reaction (own reaction only).
+  Auth required: Yes
+  Path params:
+    commentId (uuid, required)
+    emoji (string, required) — URL-encoded emoji
+  Response 204: empty
+
+================================================================================
+  DOMAIN 9 — ATTACHMENTS
+================================================================================
+
+GET /tasks/{taskId}/attachments
+  Description: List all attachments on a task.
+  Auth required: Yes (project member)
+  Path params:
+    taskId (uuid, required)
+  Response 200: array of attachment objects with download_url (pre-signed, 1h expiry)
+  Example: GET /tasks/tsk_001/attachments
+
+POST /tasks/{taskId}/attachments
+  Description: Upload a file attachment to a task. Multipart form upload.
+    MIME TYPE VALIDATION: only an explicit allowlist is accepted. MIME type is
+    determined from file content (magic number inspection), NOT from the
+    Content-Type header or filename extension.
+    Allowed types: image/jpeg, image/png, image/gif, image/webp, application/pdf,
+    text/plain, text/csv, application/zip, application/x-zip-compressed,
+    application/msword, application/vnd.openxmlformats-officedocument.*,
+    application/vnd.ms-excel, application/vnd.ms-powerpoint.
+    Files are served from an isolated domain (static.tasktracker.io) with no shared
+    cookies, preventing stored XSS even if an unexpected file type is stored.
+    Response includes X-Content-Type-Options: nosniff on all served files.
+  Auth required: Yes (DEV and above)
+  Path params:
+    taskId (uuid, required)
+  Request: multipart/form-data
+    file (file, required) — binary file content, max 50MB
+    comment_id (uuid, optional) — associate with a specific comment
+  Response 201: attachment object with download_url
+  Error 415: Unsupported Media Type — MIME type not in allowlist
+  Error 413: file exceeds 50 MB
+  Example: POST /tasks/tsk_001/attachments (multipart with file field)
+
+DELETE /attachments/{attachmentId}
+  Description: Delete an attachment. Uploader or PM/PO/SA.
+  Auth required: Yes (uploader, PM, PO, SA)
+  Path params:
+    attachmentId (uuid, required)
+  Response 204: empty
+
+================================================================================
+  DOMAIN 10 — NOTIFICATIONS
+================================================================================
+
+GET /notifications
+  Description: Get notifications for the current user.
+  Auth required: Yes
+  Query params:
+    limit, cursor — pagination
+    is_read (bool) — filter read/unread
+    type (string) — filter by notification type enum
+  Response 200: paginated list of notification objects
+  Example: GET /notifications?is_read=false
+
+PATCH /notifications/{notificationId}
+  Description: Mark a single notification as read.
+  Auth required: Yes (recipient only)
+  Path params:
+    notificationId (uuid, required)
+  Request body:
+    is_read (bool, required) — set to true to mark as read
+  Response 200: updated notification object
+
+POST /notifications/read-all
+  Description: Mark all notifications as read for the current user.
+  Auth required: Yes
+  Response 200: { "marked_count": int }
+
+DELETE /notifications/{notificationId}
+  Description: Delete a notification.
+  Auth required: Yes (recipient only)
+  Path params:
+    notificationId (uuid, required)
+  Response 204: empty
+
+================================================================================
+  DOMAIN 11 — ACTIVITY LOG
+================================================================================
+
+GET /projects/{projectId}/activity
+  Description: Get the activity log for a project (all entities).
+  Auth required: Yes (project member)
+  Path params:
+    projectId (uuid, required)
+  Query params:
+    limit, cursor — pagination
+    entity_type (string) — "task" | "project" | "sprint" | "comment"
+    actor_id (uuid) — filter by user who performed action
+    action (string) — filter by action name
+    since (datetime) — events after this timestamp
+    until (datetime) — events before this timestamp
+  Response 200: paginated list of activity log entries
+  Example: GET /projects/proj_789/activity?entity_type=task&since=2024-01-01T00:00:00Z
+
+GET /tasks/{taskId}/activity
+  Description: Get the activity history for a specific task.
+  Auth required: Yes (project member; GU with task access)
+  Path params:
+    taskId (uuid, required)
+  Query params:
+    limit, cursor — pagination
+  Response 200: paginated list of activity log entries for the task
+  Example: GET /tasks/tsk_001/activity
+
+================================================================================
+  DOMAIN 12 — SPRINTS
+================================================================================
+
+GET /projects/{projectId}/sprints
+  Description: List all sprints in a project.
+  Auth required: Yes (project member)
+  Path params:
+    projectId (uuid, required)
+  Query params:
+    limit, cursor — pagination
+    status (string) — "planned" | "active" | "completed"
+  Response 200: paginated list of sprint objects
+  Example: GET /projects/proj_789/sprints?status=active
+
+POST /projects/{projectId}/sprints
+  Description: Create a new sprint. PM, PO, SA.
+  Auth required: Yes (PM, PO, SA)
+  Path params:
+    projectId (uuid, required)
+  Request body:
+    name (string, required) — max 200 chars
+    goal (string, optional) — max 1000 chars
+    start_date (date, optional)
+    end_date (date, optional)
+  Response 201: created sprint object with status="planned"
+  Example:
+    POST /projects/proj_789/sprints
+    { "name": "Sprint 5", "goal": "Complete authentication module", "start_date": "2024-04-01", "end_date": "2024-04-14" }
+
+GET /sprints/{sprintId}
+  Description: Get sprint details including task summary statistics.
+  Auth required: Yes (project member)
+  Path params:
+    sprintId (uuid, required)
+  Response 200: sprint object with task stats { total, completed, in_progress, story_points }
+  Example: GET /sprints/spr_101
+
+PATCH /sprints/{sprintId}
+  Description: Update sprint fields. PM, PO, SA.
+  Auth required: Yes (PM, PO, SA)
+  Path params:
+    sprintId (uuid, required)
+  Request body (all optional):
+    name (string) — max 200 chars
+    goal (string) — max 1000 chars
+    start_date (date)
+    end_date (date)
+  Response 200: updated sprint object
+
+DELETE /sprints/{sprintId}
+  Description: Delete a sprint (tasks returned to backlog). PM, PO, SA.
+  Auth required: Yes (PM, PO, SA)
+  Path params:
+    sprintId (uuid, required)
+  Response 204: empty
+
+POST /sprints/{sprintId}/start
+  Description: Activate a sprint. Only one active sprint allowed per project at a time.
+  Auth required: Yes (PM, PO, SA)
+  Path params:
+    sprintId (uuid, required)
+  Response 200: updated sprint object with status="active"
+
+POST /sprints/{sprintId}/complete
+  Description: Complete an active sprint. Tasks not done return to backlog or next sprint.
+    CROSS-PROJECT VALIDATION: if next_sprint_id is provided, it must belong to the
+    same project as the completing sprint (422 CROSS_PROJECT_REFERENCE if not).
+  Auth required: Yes (PM, PO, SA)
+  Path params:
+    sprintId (uuid, required)
+  Request body (optional):
+    incomplete_tasks_action (string, default "backlog") — "backlog" | "next_sprint"
+    next_sprint_id (uuid, optional) — required if incomplete_tasks_action="next_sprint";
+                                      must belong to the same project
+  Response 200: completed sprint object with summary stats
+  Error 422: CROSS_PROJECT_REFERENCE — next_sprint_id belongs to a different project
+
+POST /sprints/{sprintId}/tasks
+  Description: Move a task into a sprint.
+  Auth required: Yes (PM, PO, SA, DEV for own tasks)
+  Path params:
+    sprintId (uuid, required)
+  Request body:
+    task_id (uuid, required)
+  Response 201: { sprint_id, task_id }
+
+DELETE /sprints/{sprintId}/tasks/{taskId}
+  Description: Remove a task from a sprint (returns to backlog).
+  Auth required: Yes (PM, PO, SA, DEV for own tasks)
+  Path params:
+    sprintId (uuid, required)
+    taskId (uuid, required)
+  Response 204: empty
+
+================================================================================
+  DOMAIN 13 — BOARDS
+================================================================================
+
+GET /projects/{projectId}/boards
+  Description: List all boards in a project.
+  Auth required: Yes (project member)
+  Path params:
+    projectId (uuid, required)
+  Response 200: array of board objects
+  Example: GET /projects/proj_789/boards
+
+POST /projects/{projectId}/boards
+  Description: Create a new board. PM, PO, SA.
+  Auth required: Yes (PM, PO, SA)
+  Path params:
+    projectId (uuid, required)
+  Request body:
+    name (string, required)
+    type (string, required) — "kanban" | "scrum"
+    is_default (bool, optional, default false)
+  Response 201: created board object with default columns
+  Example:
+    POST /projects/proj_789/boards
+    { "name": "Main Board", "type": "kanban" }
+
+GET /boards/{boardId}
+  Description: Get board details with columns and WIP limits.
+  Auth required: Yes (project member)
+  Path params:
+    boardId (uuid, required)
+  Response 200: board object with columns array
+
+PATCH /boards/{boardId}
+  Description: Update board settings. PM, PO, SA.
+  Auth required: Yes (PM, PO, SA)
+  Path params:
+    boardId (uuid, required)
+  Request body (all optional):
+    name (string)
+    is_default (bool)
+  Response 200: updated board object
+
+DELETE /boards/{boardId}
+  Description: Delete a board (tasks lose board_column_id). PM, PO, SA.
+  Auth required: Yes (PM, PO, SA)
+  Path params:
+    boardId (uuid, required)
+  Response 204: empty
+
+GET /boards/{boardId}/columns
+  Description: List columns of a board ordered by position.
+  Auth required: Yes (project member)
+  Path params:
+    boardId (uuid, required)
+  Response 200: array of column objects with task counts
+  Example: GET /boards/brd_001/columns
+
+POST /boards/{boardId}/columns
+  Description: Add a column to a board. PM, PO, SA.
+  Auth required: Yes (PM, PO, SA)
+  Path params:
+    boardId (uuid, required)
+  Request body:
+    name (string, required)
+    status_mapping (string, required) — task status enum value to map
+    position (int, optional)
+    wip_limit (int, optional) — max tasks in this column; null = no limit
+  Response 201: created column object
+  Example:
+    POST /boards/brd_001/columns
+    { "name": "In Review", "status_mapping": "in_review", "position": 3, "wip_limit": 5 }
+
+PATCH /boards/{boardId}/columns/{columnId}
+  Description: Update a board column. PM, PO, SA.
+  Auth required: Yes (PM, PO, SA)
+  Path params:
+    boardId (uuid, required)
+    columnId (uuid, required)
+  Request body (all optional):
+    name (string)
+    status_mapping (string)
+    position (int)
+    wip_limit (int)
+  Response 200: updated column object
+
+DELETE /boards/{boardId}/columns/{columnId}
+  Description: Delete a board column (tasks in column lose board_column_id). PM, PO, SA.
+  Auth required: Yes (PM, PO, SA)
+  Path params:
+    boardId (uuid, required)
+    columnId (uuid, required)
+  Response 204: empty
+
+================================================================================
+  DOMAIN 14 — TIME LOGS
+================================================================================
+
+GET /tasks/{taskId}/time-logs
+  Description: List time log entries for a task.
+  Auth required: Yes (project member)
+  Path params:
+    taskId (uuid, required)
+  Query params:
+    limit, cursor — pagination
+    user_id (uuid) — filter by logger
+    since (date)
+    until (date)
+  Response 200: paginated list of time log entries with total_minutes summary
+  Example: GET /tasks/tsk_001/time-logs
+
+POST /tasks/{taskId}/time-logs
+  Description: Log work time on a task. DEV and above.
+  Auth required: Yes (DEV, PM, PO, SA)
+  Path params:
+    taskId (uuid, required)
+  Request body:
+    logged_minutes (int, required) — 1 to 1440 (max 24 hours per entry)
+    logged_date (date, required)
+    description (string, optional, max 1000 chars) — what was done
+  Response 201: created time log object
+  Error 422: logged_minutes out of range
+  Example:
+    POST /tasks/tsk_001/time-logs
+    { "logged_minutes": 90, "logged_date": "2024-03-15", "description": "Implemented token validation" }
+
+PATCH /time-logs/{logId}
+  Description: Update a time log entry. Log owner or SA.
+  Auth required: Yes (log owner or SA)
+  Path params:
+    logId (uuid, required)
+  Request body (all optional):
+    logged_minutes (int) — 1 to 1440 (max 24 hours per entry)
+    logged_date (date)
+    description (string)
+  Response 200: updated time log object
+
+DELETE /time-logs/{logId}
+  Description: Delete a time log entry. Log owner or SA.
+  Auth required: Yes (log owner or SA)
+  Path params:
+    logId (uuid, required)
+  Response 204: empty
+
+================================================================================
+  DOMAIN 15 — ANALYTICS
+================================================================================
+
+GET /projects/{projectId}/snapshots
+  Description: Get task metric snapshots for a project (burndown data).
+  Auth required: Yes (project member)
+  Path params:
+    projectId (uuid, required)
+  Query params:
+    sprint_id (uuid) — filter by sprint
+    since (date) — start of date range
+    until (date) — end of date range
+    limit, cursor — pagination
+  Response 200: array of snapshot objects ordered by date
+  Example: GET /projects/proj_789/snapshots?sprint_id=spr_101&since=2024-04-01
+
+GET /projects/{projectId}/metrics/users
+  Description: Get aggregated user metrics for all members of a project.
+  Auth required: Yes (PM, PO, SA, GA)
+  Path params:
+    projectId (uuid, required)
+  Query params:
+    since (date, required)
+    until (date, required)
+    user_id (uuid) — filter to specific user
+  Response 200: array of user_metrics objects grouped by user
+  Example: GET /projects/proj_789/metrics/users?since=2024-04-01&until=2024-04-30
+
+GET /users/{userId}/metrics
+  Description: Get aggregated performance metrics for a user.
+  Auth required: Yes (own account, SA, GA, or PO/PM in shared project)
+  Path params:
+    userId (uuid, required)
+  Query params:
+    since (date, required)
+    until (date, required)
+    project_id (uuid, optional) — scope to a specific project; null = all projects
+  Response 200: user_metrics object or array grouped by project
+  Example: GET /users/usr_456/metrics?since=2024-01-01&until=2024-03-31
+
+GET /projects/{projectId}/metrics/summary
+  Description: Get a current summary of project health metrics.
+  Auth required: Yes (project member)
+  Path params:
+    projectId (uuid, required)
+  Response 200: summary object with:
+    total_tasks, open_tasks, completed_tasks, overdue_tasks,
+    total_story_points, completed_story_points, velocity (last 3 sprints avg),
+    active_sprint (sprint object or null)
+  Example: GET /projects/proj_789/metrics/summary
+
+================================================================================
+  WEBHOOK EVENTS (informational)
+================================================================================
+
+  Events emitted (can be used to trigger integrations):
+    task.created, task.updated, task.deleted, task.status_changed, task.assigned
+    comment.created, comment.deleted
+    sprint.started, sprint.completed
+    project.created, project.archived, project.deleted
+    member.added, member.removed, member.role_changed
+
+================================================================================
+  RATE LIMITS
+================================================================================
+  Global default: 1000 requests per minute per authenticated user
+  File uploads: 100 per hour per user
+  Headers returned: X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset
+  Exceeded: HTTP 429 Too Many Requests with Retry-After header
+
+  AUTH-SPECIFIC LIMITS (applied before global limit, on unauthenticated endpoints):
+    POST /auth/login:              5 failed attempts per email per 15 min (then 429)
+    POST /auth/register:           10 requests per IP per hour
+    POST /auth/forgot-password:    3 requests per email per hour
+    POST /auth/resend-verification: 3 requests per email per hour
+    POST /auth/refresh:            10 requests per token family per minute
+
+================================================================================
+  JWT & SECURITY METADATA
+================================================================================
+  GET /.well-known/jwks.json
+    Description: Returns the public JWK set for verifying JWT signatures.
+      Clients MUST validate JWT signatures against this key set.
+      Signing algorithm: RS256 only. Tokens with any other alg value (including
+      "none") are rejected by the server.
+    Auth required: No
+    Response 200: JWK Set document { "keys": [...] }
+    Cache-Control: max-age=3600 (keys rotate at most once per hour)
+
+================================================================================
+  END OF API DESCRIPTION v1.0
+================================================================================

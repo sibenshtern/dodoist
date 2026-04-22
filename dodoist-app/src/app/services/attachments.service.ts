@@ -38,6 +38,29 @@ export class AttachmentsService {
     );
   }
 
+  /**
+   * Downloads the attachment via the auth-gated endpoint.
+   * Uses the Bearer token (sent by the interceptor) so no unauthenticated
+   * media URL is ever exposed in the browser.
+   */
+  download(attachmentId: string, filename: string): void {
+    this.http
+      .get(`${environment.apiBase}/api/attachments/${attachmentId}/download/`, {
+        responseType: 'blob',
+        withCredentials: true,
+      })
+      .subscribe(blob => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      });
+  }
+
   isImage(mimeType: string): boolean {
     return mimeType.startsWith('image/');
   }

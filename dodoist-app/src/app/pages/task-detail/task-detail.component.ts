@@ -5,10 +5,11 @@ import { FormBuilder, ReactiveFormsModule } from '@angular/forms';
 import {
   TaskService,
   TaskDetail,
-  Comment,
-  TimeLog,
   ActivityLogEntry,
 } from '../../services/task.service';
+import { CommentsService, Comment } from '../../services/comments.service';
+import { TimeLogsService, TimeLog } from '../../services/time-logs.service';
+import { ReactionsService } from '../../services/reactions.service';
 import { AttachmentsService, Attachment } from '../../services/attachments.service';
 import { SprintsService, Sprint } from '../../services/sprints.service';
 import { ToastService } from '../../services/toast.service';
@@ -53,6 +54,9 @@ export class TaskDetailComponent implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly taskService = inject(TaskService);
+  private readonly commentsService = inject(CommentsService);
+  private readonly timeLogsService = inject(TimeLogsService);
+  private readonly reactionsService = inject(ReactionsService);
   private readonly attachmentsService = inject(AttachmentsService);
   private readonly sprintsService = inject(SprintsService);
   private readonly toast = inject(ToastService);
@@ -146,14 +150,14 @@ export class TaskDetailComponent implements OnInit {
   }
 
   loadComments(id: string): void {
-    this.taskService.getComments(id).subscribe({
+    this.commentsService.list(id).subscribe({
       next: (c) => this.comments.set(c),
       error: () => this.toast.error('Failed to load comments.'),
     });
   }
 
   loadTimeLogs(id: string): void {
-    this.taskService.getTimeLogs(id).subscribe({
+    this.timeLogsService.listForTask(id).subscribe({
       next: (res) => {
         this.timeLogs.set(res.data);
         this.totalMinutes.set(res.meta.total_minutes);
@@ -429,7 +433,7 @@ export class TaskDetailComponent implements OnInit {
       type: 'doc',
       content: [{ type: 'paragraph', content: [{ type: 'text', text: body }] }],
     };
-    this.taskService.addComment(task.id, proseMirrorBody).subscribe({
+    this.commentsService.create(task.id, proseMirrorBody).subscribe({
       next: (comment) => {
         this.comments.update((cs) => [comment, ...cs]);
         this.commentForm.reset({ body: '' });
@@ -440,7 +444,7 @@ export class TaskDetailComponent implements OnInit {
 
   deleteComment(commentId: string): void {
     if (!confirm('Delete this comment?')) return;
-    this.taskService.deleteComment(commentId).subscribe({
+    this.commentsService.delete(commentId).subscribe({
       next: () => this.comments.update((cs) => cs.filter((c) => c.id !== commentId)),
       error: () => this.toast.error('Failed to delete comment.'),
     });
@@ -469,8 +473,8 @@ export class TaskDetailComponent implements OnInit {
     const task = this.task();
     if (!task) return;
     const { logged_minutes, logged_date, description } = this.timeLogForm.getRawValue();
-    this.taskService
-      .addTimeLog(task.id, {
+    this.timeLogsService
+      .create(task.id, {
         logged_minutes: Number(logged_minutes),
         logged_date,
         description,
@@ -492,7 +496,7 @@ export class TaskDetailComponent implements OnInit {
 
   deleteTimeLog(logId: string, minutes: number): void {
     if (!confirm('Remove this time log?')) return;
-    this.taskService.deleteTimeLog(logId).subscribe({
+    this.timeLogsService.delete(logId).subscribe({
       next: () => {
         this.timeLogs.update((ls) => ls.filter((l) => l.id !== logId));
         this.totalMinutes.update((m) => m - minutes);
@@ -591,7 +595,7 @@ export class TaskDetailComponent implements OnInit {
   // ── Reactions ────────────────────────────────────────────────────────────
 
   react(commentId: string, emoji: string): void {
-    this.taskService.addReaction(commentId, emoji).subscribe({
+    this.reactionsService.add(commentId, emoji).subscribe({
       error: () => this.toast.error('Failed to add reaction.'),
     });
   }

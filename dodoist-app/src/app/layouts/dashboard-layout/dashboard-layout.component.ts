@@ -1,11 +1,12 @@
 import { Component, computed, HostListener, inject, OnDestroy, OnInit, signal } from '@angular/core';
-import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
+import { Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { TuiIcon } from '@taiga-ui/core';
-import { interval, Subscription, switchMap, EMPTY } from 'rxjs';
+import { Subscription, switchMap, EMPTY, toObservable } from 'rxjs';
 import { UserService } from '../../services/user.service';
 import { AuthService } from '../../services/auth.service';
 import { DashboardService, ProjectSummary } from '../../services/dashboard.service';
 import { NotificationsService } from '../../services/notifications.service';
+import { SseService } from '../../services/sse.service';
 import { SearchPaletteComponent } from '../../shared/search-palette/search-palette.component';
 
 interface NavItem {
@@ -22,12 +23,13 @@ interface NavItem {
   styleUrl: './dashboard-layout.component.scss',
 })
 export class DashboardLayoutComponent implements OnInit, OnDestroy {
-  private readonly userService = inject(UserService);
+  readonly userService = inject(UserService);
   private readonly authService = inject(AuthService);
   private readonly dashboardService = inject(DashboardService);
   readonly notifService = inject(NotificationsService);
+  private readonly sseService = inject(SseService);
 
-  private pollSub?: Subscription;
+  private projectSub?: Subscription;
 
   readonly navItems: NavItem[] = [
     { label: 'Dashboard',  icon: '@tui.layout-dashboard', path: '/home' },
@@ -39,6 +41,11 @@ export class DashboardLayoutComponent implements OnInit, OnDestroy {
 
   readonly projects = signal<ProjectSummary[]>([]);
   readonly searchOpen = signal(false);
+  readonly wsDropdownOpen = signal(false);
+  readonly isSwitching = signal(false);
+
+  readonly workspaceList = computed(() => this.userService.workspaces());
+  private readonly router = inject(Router);
 
   @HostListener('document:keydown', ['$event'])
   onGlobalKeydown(event: KeyboardEvent): void {
@@ -84,25 +91,39 @@ export class DashboardLayoutComponent implements OnInit, OnDestroy {
       this.userService.loadCurrentUser().subscribe({ error: console.error });
     }
 
-    this.userService.loadWorkspaces().pipe(
-      switchMap(workspaces => {
-        if (workspaces.length === 0) return EMPTY;
-        return this.dashboardService.getAllProjects(workspaces.map(w => w.slug));
+    // Load workspaces; then reactively refetch projects whenever the active workspace changes.
+    this.projectSub = this.userService.loadWorkspaces().pipe(
+      switchMap(() => toObservable(this.userService.currentWorkspace)),
+      switchMap(ws => {
+        if (!ws) return EMPTY;
+        return this.dashboardService.getProjectsForActiveWorkspace(ws.slug);
       }),
     ).subscribe({
       next: p => this.projects.set(p),
       error: console.error,
     });
 
-    // Initial load + 60-second polling for notifications
+    // Initial notification load; subsequent updates come through SSE.
     this.notifService.list({ limit: 50 }).subscribe({ error: console.error });
-    this.pollSub = interval(60_000).subscribe(() => {
-      this.notifService.list({ limit: 50 }).subscribe({ error: console.error });
-    });
+    this.sseService.start();
   }
 
   ngOnDestroy(): void {
-    this.pollSub?.unsubscribe();
+    this.projectSub?.unsubscribe();
+    this.sseService.stop();
+  }
+
+  switchWorkspace(ws: import('../../services/user.service').Workspace): void {
+    if (this.isSwitching()) return;
+    this.isSwitching.set(true);
+    this.userService.switchWorkspace(ws).subscribe({
+      next: () => {
+        this.wsDropdownOpen.set(false);
+        this.isSwitching.set(false);
+        this.router.navigate(['/home']);
+      },
+      error: () => this.isSwitching.set(false),
+    });
   }
 
   logout(): void {

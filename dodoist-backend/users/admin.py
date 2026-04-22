@@ -1,16 +1,46 @@
 from django.contrib import admin
+from django.contrib import messages
 
-from .models import Notification, User, UserPreferences, UserSession
+from .models import GlobalRole, Notification, User, UserPreferences, UserSession
 
 
 @admin.register(User)
 class UserAdmin(admin.ModelAdmin):
-    list_display = ("email", "display_name", "global_role", "is_active", "created_at")
-    list_filter = ("global_role", "is_active")
+    list_display = ("email", "display_name", "global_role", "is_active", "email_verified", "created_at")
+    list_filter = ("global_role", "is_active", "email_verified")
     search_fields = ("email", "display_name")
     ordering = ("-created_at",)
-    readonly_fields = ("created_at", "last_login")
+    readonly_fields = (
+        "created_at", "last_login", "updated_at",
+        "token_hash_display",
+        "verification_token_hash", "password_reset_token_hash",
+    )
     exclude = ("password",)
+
+    def token_hash_display(self, obj):
+        return "*** hidden ***"
+    token_hash_display.short_description = "Token hash"
+
+    def has_change_permission(self, request, obj=None):
+        if obj is None:
+            return super().has_change_permission(request)
+        # Non-SA admins cannot edit SA accounts
+        if obj.global_role == GlobalRole.SA and request.user.global_role != GlobalRole.SA:
+            return False
+        return super().has_change_permission(request, obj)
+
+    def save_model(self, request, obj, form, change):
+        # Prevent non-SA admins from promoting anyone to SA
+        if obj.global_role == GlobalRole.SA and request.user.global_role != GlobalRole.SA:
+            messages.error(request, "Only System Admins can assign the SA role.")
+            obj.global_role = GlobalRole.GA
+        # Prevent admins from demoting their own account
+        if change and obj.pk == request.user.pk:
+            original = User.objects.get(pk=obj.pk)
+            if original.global_role != obj.global_role:
+                messages.warning(request, "You cannot change your own role.")
+                obj.global_role = original.global_role
+        super().save_model(request, obj, form, change)
 
 
 @admin.register(UserSession)

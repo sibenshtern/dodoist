@@ -1,18 +1,36 @@
 import os
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.environ.get(
-    "DJANGO_SECRET_KEY",
-    "django-insecure-dev-key-replace-in-production",
-)
+_SECRET_KEY_DEFAULT = "id9-*c7ki%=9!o=pxx#_d3nt)eim-!)y5=knuw4b9=attnug&-"
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", _SECRET_KEY_DEFAULT)
 
 DEBUG = os.environ.get("DJANGO_DEBUG", "true").lower() == "true"
+
+if not DEBUG:
+    if SECRET_KEY == _SECRET_KEY_DEFAULT:
+        raise ImproperlyConfigured(
+            "DJANGO_SECRET_KEY must be set to a strong secret in production."
+        )
+    if not os.environ.get("DJANGO_ALLOWED_HOSTS"):
+        raise ImproperlyConfigured(
+            "DJANGO_ALLOWED_HOSTS must be explicitly set in production."
+        )
 
 ALLOWED_HOSTS = os.environ.get(
     "DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1"
 ).split(",")
+
+# Comma-separated list of trusted reverse proxy IPs.
+# Only requests from these IPs will have X-Forwarded-For trusted.
+TRUSTED_PROXIES = set(
+    ip.strip()
+    for ip in os.environ.get("TRUSTED_PROXIES", "").split(",")
+    if ip.strip()
+)
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -28,6 +46,7 @@ INSTALLED_APPS = [
     "projects",
     "tasks",
     "analytics",
+    "realtime",
 ]
 
 SPECTACULAR_SETTINGS = {
@@ -45,16 +64,23 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
     ],
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 50,
     "DEFAULT_THROTTLE_CLASSES": [
         "rest_framework.throttling.UserRateThrottle",
     ],
     "DEFAULT_THROTTLE_RATES": {
-        "user":             "1000/minute",
-        "login":            "5/minute",
-        "register":         "10/hour",
-        "forgot_password":  "5/hour",
+        "user":                 "1000/minute",
+        "login":                "5/minute",
+        "register":             "10/hour",
+        "forgot_password":      "5/hour",
+        "reset_password":       "5/hour",
+        "verify_email":         "10/hour",
+        "resend_verification":  "5/hour",
+        "comment_write":        "60/hour",
+        "reaction_write":       "120/hour",
+        "attachment_upload":    "100/hour",
     },
 }
 
@@ -63,14 +89,44 @@ MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
+]
+
+# ---------------------------------------------------------------------------
+# HTTPS / security flags (production only)
+# ---------------------------------------------------------------------------
+
+if not DEBUG:
+    SECURE_SSL_REDIRECT = True
+    SECURE_HSTS_SECONDS = 31536000
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
+
+X_FRAME_OPTIONS = "DENY"
+SESSION_COOKIE_HTTPONLY = True
+# JS must be able to read the CSRF cookie to send it in the X-CSRFToken header.
+CSRF_COOKIE_HTTPONLY = False
+
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get(
+        "CSRF_TRUSTED_ORIGINS",
+        "http://localhost:4200",
+    ).split(",")
+    if origin.strip()
 ]
 
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        "DIRS": [BASE_DIR / "templates"],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -112,9 +168,17 @@ PASSWORD_HASHERS = [
     "django.contrib.auth.hashers.PBKDF2PasswordHasher",
 ]
 
-# CORS — allow the Angular dev server and send cookies cross-origin
+# ---------------------------------------------------------------------------
+# CORS — allow the Angular dev server (and production origins from env)
+# ---------------------------------------------------------------------------
+
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:4200",
+    *[
+        o.strip()
+        for o in os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",")
+        if o.strip()
+    ],
 ]
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_HEADERS = [
@@ -127,14 +191,14 @@ CORS_ALLOW_HEADERS = [
     "user-agent",
     "x-csrftoken",
     "x-requested-with",
-    # Custom auth headers
+    # Verification token still sent as header (stateless, no auth required)
     "x-verification-token",
-    "x-reset-token",
-    "x-new-password",
-    "x-current-password",
 ]
 
+# ---------------------------------------------------------------------------
 # Email
+# ---------------------------------------------------------------------------
+
 EMAIL_BACKEND = os.environ.get(
     "EMAIL_BACKEND",
     "django.core.mail.backends.console.EmailBackend",
@@ -147,20 +211,32 @@ EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
 DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "Dodoist <noreply@dodoist.com>")
 FRONTEND_BASE_URL = os.environ.get("FRONTEND_BASE_URL", "http://localhost:4200")
 
-# Celery — use in-memory transport in dev so redis-py is not required
-_broker_default = "memory://" if DEBUG else "redis://localhost:6379/0"
-_result_default = "cache+memory://" if DEBUG else "redis://localhost:6379/0"
+# ---------------------------------------------------------------------------
+# Celery
+# ---------------------------------------------------------------------------
+
+_broker_default = "memory://" if DEBUG else os.environ.get("CELERY_BROKER_URL", "")
+if not DEBUG and not os.environ.get("CELERY_BROKER_URL"):
+    raise ImproperlyConfigured("CELERY_BROKER_URL must be set in production.")
+
+_result_default = "cache+memory://" if DEBUG else os.environ.get("CELERY_RESULT_BACKEND", "")
+
 CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", _broker_default)
 CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", _result_default)
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = "UTC"
+
 # In dev (DEBUG=True) run tasks synchronously so no broker is needed.
-# Override with CELERY_ALWAYS_EAGER=false in .env when you want to test real async.
 _eager_default = "true" if DEBUG else "false"
 CELERY_TASK_ALWAYS_EAGER = os.environ.get("CELERY_ALWAYS_EAGER", _eager_default).lower() == "true"
-CELERY_TASK_EAGER_PROPAGATES = True  # raise task exceptions in eager mode
+# Only propagate task exceptions in eager/dev mode — production swallows and retries.
+CELERY_TASK_EAGER_PROPAGATES = DEBUG
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
 
 LOGGING = {
     "version": 1,

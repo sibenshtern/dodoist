@@ -1,0 +1,2224 @@
+openapi: 3.0.3
+info:
+  title: Dodoist API
+  version: 1.0.0
+  description: Task and project management API combining personal todos with Scrum/Kanban
+    workflows.
+paths:
+  /api/activity/:
+    get:
+      operationId: activity_retrieve
+      description: |-
+        GET /api/activity/
+
+        Returns the last N activity log entries across all projects
+        the authenticated user is a member of.
+      tags:
+      - activity
+      responses:
+        '200':
+          description: No response body
+  /api/attachments/{id}/:
+    delete:
+      operationId: attachments_destroy
+      description: DELETE /api/attachments/<pk>/
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - attachments
+      responses:
+        '204':
+          description: No response body
+  /api/attachments/{id}/download/:
+    get:
+      operationId: attachments_download_retrieve
+      description: |-
+        GET /api/attachments/<pk>/download/
+
+        Streams the attachment file after verifying the caller has task-view access.
+        This endpoint is the only authorized download path — direct media URLs are
+        not exposed in the API (see AttachmentSerializer.get_download_url).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - attachments
+      responses:
+        '200':
+          description: No response body
+  /api/auth/forgot-password:
+    post:
+      operationId: auth_forgot_password_create
+      description: 'POST /api/auth/forgot-password   body: {email}'
+      tags:
+      - auth
+      security:
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/auth/login:
+    post:
+      operationId: auth_login_create
+      description: |-
+        POST /api/auth/login
+
+        Validates credentials. Returns a 15-minute access token in the body
+        and sets a 7-day HttpOnly refresh token cookie.
+      tags:
+      - auth
+      security:
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/auth/logout:
+    post:
+      operationId: auth_logout_create
+      description: |-
+        POST /api/auth/logout
+
+        Invalidates the current session. Requires authentication.
+        Clears the refresh token cookie.
+      tags:
+      - auth
+      responses:
+        '200':
+          description: No response body
+  /api/auth/refresh:
+    post:
+      operationId: auth_refresh_create
+      description: |-
+        POST /api/auth/refresh
+
+        Exchanges the HttpOnly refresh token cookie for new access + refresh tokens
+        (full rotation). If a previously-rotated refresh token is replayed, the
+        session is revoked (refresh token reuse detection).
+      tags:
+      - auth
+      security:
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/auth/register:
+    post:
+      operationId: auth_register_create
+      description: |-
+        POST /api/auth/register
+
+        Creates a new user account. Returns a 15-minute access token in the body
+        and sets a 7-day HttpOnly refresh token cookie.
+      tags:
+      - auth
+      security:
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/auth/resend-verification:
+    post:
+      operationId: auth_resend_verification_create
+      description: POST /api/auth/resend-verification   (authenticated)
+      tags:
+      - auth
+      responses:
+        '200':
+          description: No response body
+  /api/auth/reset-password:
+    post:
+      operationId: auth_reset_password_create
+      description: 'POST /api/auth/reset-password   body: {token, new_password}'
+      tags:
+      - auth
+      security:
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/auth/sse-token/:
+    post:
+      operationId: auth_sse_token_create
+      description: |-
+        POST /api/auth/sse-token/
+        Returns a 60-second single-use token the client passes as ?token= to /api/events/.
+      tags:
+      - auth
+      responses:
+        '200':
+          description: No response body
+  /api/auth/verify-email:
+    post:
+      operationId: auth_verify_email_create
+      description: 'POST /api/auth/verify-email   header: X-Verification-Token'
+      tags:
+      - auth
+      security:
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/boards/{board_pk}/columns/{id}/:
+    patch:
+      operationId: boards_columns_partial_update
+      description: |-
+        PATCH  /api/boards/<board_pk>/columns/<pk>/  — update column
+        DELETE /api/boards/<board_pk>/columns/<pk>/  — delete column
+      parameters:
+      - in: path
+        name: board_pk
+        schema:
+          type: string
+          format: uuid
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - boards
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: boards_columns_destroy
+      description: |-
+        PATCH  /api/boards/<board_pk>/columns/<pk>/  — update column
+        DELETE /api/boards/<board_pk>/columns/<pk>/  — delete column
+      parameters:
+      - in: path
+        name: board_pk
+        schema:
+          type: string
+          format: uuid
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - boards
+      responses:
+        '204':
+          description: No response body
+  /api/boards/{id}/:
+    get:
+      operationId: boards_retrieve
+      description: |-
+        GET    /api/boards/<pk>/  — get board
+        PATCH  /api/boards/<pk>/  — update board (PM/PO/SA)
+        DELETE /api/boards/<pk>/  — delete board (PM/PO/SA)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - boards
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: boards_partial_update
+      description: |-
+        GET    /api/boards/<pk>/  — get board
+        PATCH  /api/boards/<pk>/  — update board (PM/PO/SA)
+        DELETE /api/boards/<pk>/  — delete board (PM/PO/SA)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - boards
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: boards_destroy
+      description: |-
+        GET    /api/boards/<pk>/  — get board
+        PATCH  /api/boards/<pk>/  — update board (PM/PO/SA)
+        DELETE /api/boards/<pk>/  — delete board (PM/PO/SA)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - boards
+      responses:
+        '204':
+          description: No response body
+  /api/boards/{id}/columns/:
+    get:
+      operationId: boards_columns_retrieve
+      description: |-
+        GET  /api/boards/<pk>/columns/  — list columns
+        POST /api/boards/<pk>/columns/  — create column (PM/PO/SA)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - boards
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: boards_columns_create
+      description: |-
+        GET  /api/boards/<pk>/columns/  — list columns
+        POST /api/boards/<pk>/columns/  — create column (PM/PO/SA)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - boards
+      responses:
+        '200':
+          description: No response body
+  /api/comments/{id}/:
+    get:
+      operationId: comments_retrieve
+      description: |-
+        GET    /api/comments/<pk>/  — fetch a single comment
+        PATCH  /api/comments/<pk>/  — edit comment (author or SA)
+        DELETE /api/comments/<pk>/  — soft-delete (author, PM, PO, or SA)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - comments
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: comments_partial_update
+      description: |-
+        GET    /api/comments/<pk>/  — fetch a single comment
+        PATCH  /api/comments/<pk>/  — edit comment (author or SA)
+        DELETE /api/comments/<pk>/  — soft-delete (author, PM, PO, or SA)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - comments
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: comments_destroy
+      description: |-
+        GET    /api/comments/<pk>/  — fetch a single comment
+        PATCH  /api/comments/<pk>/  — edit comment (author or SA)
+        DELETE /api/comments/<pk>/  — soft-delete (author, PM, PO, or SA)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - comments
+      responses:
+        '204':
+          description: No response body
+  /api/comments/{id}/reactions/:
+    get:
+      operationId: comments_reactions_retrieve
+      description: |-
+        GET    /api/comments/<pk>/reactions/         — list reactions
+        POST   /api/comments/<pk>/reactions/         — add reaction
+        DELETE /api/comments/<pk>/reactions/<emoji>/ — remove reaction
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - comments
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: comments_reactions_create
+      description: |-
+        GET    /api/comments/<pk>/reactions/         — list reactions
+        POST   /api/comments/<pk>/reactions/         — add reaction
+        DELETE /api/comments/<pk>/reactions/<emoji>/ — remove reaction
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - comments
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: comments_reactions_destroy
+      description: |-
+        GET    /api/comments/<pk>/reactions/         — list reactions
+        POST   /api/comments/<pk>/reactions/         — add reaction
+        DELETE /api/comments/<pk>/reactions/<emoji>/ — remove reaction
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - comments
+      responses:
+        '204':
+          description: No response body
+  /api/comments/{id}/reactions/{emoji}/:
+    get:
+      operationId: comments_reactions_retrieve_2
+      description: |-
+        GET    /api/comments/<pk>/reactions/         — list reactions
+        POST   /api/comments/<pk>/reactions/         — add reaction
+        DELETE /api/comments/<pk>/reactions/<emoji>/ — remove reaction
+      parameters:
+      - in: path
+        name: emoji
+        schema:
+          type: string
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - comments
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: comments_reactions_create_2
+      description: |-
+        GET    /api/comments/<pk>/reactions/         — list reactions
+        POST   /api/comments/<pk>/reactions/         — add reaction
+        DELETE /api/comments/<pk>/reactions/<emoji>/ — remove reaction
+      parameters:
+      - in: path
+        name: emoji
+        schema:
+          type: string
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - comments
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: comments_reactions_destroy_2
+      description: |-
+        GET    /api/comments/<pk>/reactions/         — list reactions
+        POST   /api/comments/<pk>/reactions/         — add reaction
+        DELETE /api/comments/<pk>/reactions/<emoji>/ — remove reaction
+      parameters:
+      - in: path
+        name: emoji
+        schema:
+          type: string
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - comments
+      responses:
+        '204':
+          description: No response body
+  /api/dashboard/stats/:
+    get:
+      operationId: dashboard_stats_retrieve
+      description: |-
+        GET /api/dashboard/stats/
+
+        Returns aggregated task statistics for the authenticated user.
+      tags:
+      - dashboard
+      responses:
+        '200':
+          description: No response body
+  /api/events/:
+    get:
+      operationId: events_retrieve
+      description: |-
+        GET /api/events/?token=<sse_token>
+        Streams server-sent events for the authenticated user.
+      tags:
+      - events
+      responses:
+        '200':
+          description: No response body
+  /api/notifications/:
+    get:
+      operationId: notifications_retrieve
+      description: GET /api/notifications/  — list notifications for current user
+      tags:
+      - notifications
+      responses:
+        '200':
+          description: No response body
+  /api/notifications/{id}/:
+    patch:
+      operationId: notifications_partial_update
+      description: |-
+        PATCH  /api/notifications/<pk>/  — mark as read
+        DELETE /api/notifications/<pk>/  — delete notification
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - notifications
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: notifications_destroy
+      description: |-
+        PATCH  /api/notifications/<pk>/  — mark as read
+        DELETE /api/notifications/<pk>/  — delete notification
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - notifications
+      responses:
+        '204':
+          description: No response body
+  /api/notifications/read-all/:
+    post:
+      operationId: notifications_read_all_create
+      description: POST /api/notifications/read-all/
+      tags:
+      - notifications
+      responses:
+        '200':
+          description: No response body
+  /api/projects/{id}/:
+    get:
+      operationId: projects_retrieve
+      description: |-
+        GET    /api/projects/<uuid>/  — retrieve project details
+        PATCH  /api/projects/<uuid>/  — update settings (PO, PM, SA, GA)
+        DELETE /api/projects/<uuid>/  — soft delete (PO, SA)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - projects
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: projects_partial_update
+      description: |-
+        GET    /api/projects/<uuid>/  — retrieve project details
+        PATCH  /api/projects/<uuid>/  — update settings (PO, PM, SA, GA)
+        DELETE /api/projects/<uuid>/  — soft delete (PO, SA)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - projects
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: projects_destroy
+      description: |-
+        GET    /api/projects/<uuid>/  — retrieve project details
+        PATCH  /api/projects/<uuid>/  — update settings (PO, PM, SA, GA)
+        DELETE /api/projects/<uuid>/  — soft delete (PO, SA)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - projects
+      responses:
+        '204':
+          description: No response body
+  /api/projects/{id}/activity/:
+    get:
+      operationId: projects_activity_retrieve
+      description: GET /api/projects/<pk>/activity/  — project activity feed
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - projects
+      responses:
+        '200':
+          description: No response body
+  /api/projects/{id}/archive/:
+    post:
+      operationId: projects_archive_create
+      description: POST /api/projects/<uuid>/archive/  — archive a project (PO, SA)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - projects
+      responses:
+        '200':
+          description: No response body
+  /api/projects/{id}/boards/:
+    get:
+      operationId: projects_boards_retrieve
+      description: |-
+        GET  /api/projects/<pk>/boards/  — list boards
+        POST /api/projects/<pk>/boards/  — create board (PM/PO/SA)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - projects
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: projects_boards_create
+      description: |-
+        GET  /api/projects/<pk>/boards/  — list boards
+        POST /api/projects/<pk>/boards/  — create board (PM/PO/SA)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - projects
+      responses:
+        '200':
+          description: No response body
+  /api/projects/{id}/custom-fields/:
+    get:
+      operationId: projects_custom_fields_retrieve
+      description: |-
+        GET  /api/projects/<pk>/custom-fields/  — list fields
+        POST /api/projects/<pk>/custom-fields/  — create field (PO/PM/SA/GA)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - projects
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: projects_custom_fields_create
+      description: |-
+        GET  /api/projects/<pk>/custom-fields/  — list fields
+        POST /api/projects/<pk>/custom-fields/  — create field (PO/PM/SA/GA)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - projects
+      responses:
+        '200':
+          description: No response body
+  /api/projects/{id}/custom-fields/{field_id}/:
+    patch:
+      operationId: projects_custom_fields_partial_update
+      description: |-
+        PATCH  /api/projects/<pk>/custom-fields/<field_id>/
+        DELETE /api/projects/<pk>/custom-fields/<field_id>/
+      parameters:
+      - in: path
+        name: field_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - projects
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: projects_custom_fields_destroy
+      description: |-
+        PATCH  /api/projects/<pk>/custom-fields/<field_id>/
+        DELETE /api/projects/<pk>/custom-fields/<field_id>/
+      parameters:
+      - in: path
+        name: field_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - projects
+      responses:
+        '204':
+          description: No response body
+  /api/projects/{id}/members/:
+    get:
+      operationId: projects_members_retrieve
+      description: |-
+        GET  /api/projects/<uuid>/members/  — list members with roles
+        POST /api/projects/<uuid>/members/  — add a member
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - projects
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: projects_members_create
+      description: |-
+        GET  /api/projects/<uuid>/members/  — list members with roles
+        POST /api/projects/<uuid>/members/  — add a member
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - projects
+      responses:
+        '200':
+          description: No response body
+  /api/projects/{id}/members/{user_id}/:
+    patch:
+      operationId: projects_members_partial_update
+      description: |-
+        PATCH  /api/projects/<uuid>/members/<user_id>/  — update a member's role (PO, SA)
+        DELETE /api/projects/<uuid>/members/<user_id>/  — remove a member (PO, SA)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      - in: path
+        name: user_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - projects
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: projects_members_destroy
+      description: |-
+        PATCH  /api/projects/<uuid>/members/<user_id>/  — update a member's role (PO, SA)
+        DELETE /api/projects/<uuid>/members/<user_id>/  — remove a member (PO, SA)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      - in: path
+        name: user_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - projects
+      responses:
+        '204':
+          description: No response body
+  /api/projects/{id}/metrics/summary/:
+    get:
+      operationId: projects_metrics_summary_retrieve
+      description: GET /api/projects/<pk>/metrics/summary/
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - projects
+      responses:
+        '200':
+          description: No response body
+  /api/projects/{id}/metrics/users/:
+    get:
+      operationId: projects_metrics_users_retrieve
+      description: GET /api/projects/<pk>/metrics/users/
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - projects
+      responses:
+        '200':
+          description: No response body
+  /api/projects/{id}/snapshots/:
+    get:
+      operationId: projects_snapshots_retrieve
+      description: GET /api/projects/<pk>/snapshots/
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - projects
+      responses:
+        '200':
+          description: No response body
+  /api/projects/{id}/sprints/:
+    get:
+      operationId: projects_sprints_retrieve
+      description: |-
+        GET  /api/projects/<pk>/sprints/  — list sprints
+        POST /api/projects/<pk>/sprints/  — create sprint (PM/PO/SA)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - projects
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: projects_sprints_create
+      description: |-
+        GET  /api/projects/<pk>/sprints/  — list sprints
+        POST /api/projects/<pk>/sprints/  — create sprint (PM/PO/SA)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - projects
+      responses:
+        '200':
+          description: No response body
+  /api/projects/{id}/tasks/:
+    get:
+      operationId: projects_tasks_retrieve
+      description: |-
+        GET  /api/projects/<uuid>/tasks/ — list tasks in a project
+        POST /api/projects/<uuid>/tasks/ — create a new task
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - projects
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: projects_tasks_create
+      description: |-
+        GET  /api/projects/<uuid>/tasks/ — list tasks in a project
+        POST /api/projects/<uuid>/tasks/ — create a new task
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - projects
+      responses:
+        '200':
+          description: No response body
+  /api/projects/{id}/unarchive/:
+    post:
+      operationId: projects_unarchive_create
+      description: POST /api/projects/<uuid>/unarchive/  — restore an archived project
+        (PO, SA)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - projects
+      responses:
+        '200':
+          description: No response body
+  /api/sprints/{id}/:
+    get:
+      operationId: sprints_retrieve
+      description: |-
+        GET    /api/sprints/<pk>/  — get sprint with task stats
+        PATCH  /api/sprints/<pk>/  — update sprint (PM/PO/SA)
+        DELETE /api/sprints/<pk>/  — delete planned sprint (PM/PO/SA)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - sprints
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: sprints_partial_update
+      description: |-
+        GET    /api/sprints/<pk>/  — get sprint with task stats
+        PATCH  /api/sprints/<pk>/  — update sprint (PM/PO/SA)
+        DELETE /api/sprints/<pk>/  — delete planned sprint (PM/PO/SA)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - sprints
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: sprints_destroy
+      description: |-
+        GET    /api/sprints/<pk>/  — get sprint with task stats
+        PATCH  /api/sprints/<pk>/  — update sprint (PM/PO/SA)
+        DELETE /api/sprints/<pk>/  — delete planned sprint (PM/PO/SA)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - sprints
+      responses:
+        '204':
+          description: No response body
+  /api/sprints/{id}/complete/:
+    post:
+      operationId: sprints_complete_create
+      description: POST /api/sprints/<pk>/complete/
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - sprints
+      responses:
+        '200':
+          description: No response body
+  /api/sprints/{id}/start/:
+    post:
+      operationId: sprints_start_create
+      description: POST /api/sprints/<pk>/start/
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - sprints
+      responses:
+        '200':
+          description: No response body
+  /api/sprints/{id}/tasks/:
+    post:
+      operationId: sprints_tasks_create
+      description: |-
+        POST   /api/sprints/<pk>/tasks/           — add task to sprint
+        DELETE /api/sprints/<pk>/tasks/<task_id>/ — remove task from sprint
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - sprints
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: sprints_tasks_destroy
+      description: |-
+        POST   /api/sprints/<pk>/tasks/           — add task to sprint
+        DELETE /api/sprints/<pk>/tasks/<task_id>/ — remove task from sprint
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - sprints
+      responses:
+        '204':
+          description: No response body
+  /api/sprints/{id}/tasks/{task_id}/:
+    post:
+      operationId: sprints_tasks_create_2
+      description: |-
+        POST   /api/sprints/<pk>/tasks/           — add task to sprint
+        DELETE /api/sprints/<pk>/tasks/<task_id>/ — remove task from sprint
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      - in: path
+        name: task_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - sprints
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: sprints_tasks_destroy_2
+      description: |-
+        POST   /api/sprints/<pk>/tasks/           — add task to sprint
+        DELETE /api/sprints/<pk>/tasks/<task_id>/ — remove task from sprint
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      - in: path
+        name: task_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - sprints
+      responses:
+        '204':
+          description: No response body
+  /api/tasks/:
+    get:
+      operationId: tasks_retrieve
+      description: |-
+        GET  /api/tasks/?project_id=<uuid>  — list tasks in a project
+        POST /api/tasks/                    — create a new task
+      tags:
+      - tasks
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: tasks_create
+      description: |-
+        GET  /api/tasks/?project_id=<uuid>  — list tasks in a project
+        POST /api/tasks/                    — create a new task
+      tags:
+      - tasks
+      responses:
+        '200':
+          description: No response body
+  /api/tasks/{id}/:
+    get:
+      operationId: tasks_retrieve_2
+      description: |-
+        GET    /api/tasks/<uuid>/  — retrieve a task
+        PATCH  /api/tasks/<uuid>/  — partially update a task
+        DELETE /api/tasks/<uuid>/  — soft-delete a task
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - tasks
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: tasks_partial_update
+      description: |-
+        GET    /api/tasks/<uuid>/  — retrieve a task
+        PATCH  /api/tasks/<uuid>/  — partially update a task
+        DELETE /api/tasks/<uuid>/  — soft-delete a task
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - tasks
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: tasks_destroy
+      description: |-
+        GET    /api/tasks/<uuid>/  — retrieve a task
+        PATCH  /api/tasks/<uuid>/  — partially update a task
+        DELETE /api/tasks/<uuid>/  — soft-delete a task
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - tasks
+      responses:
+        '204':
+          description: No response body
+  /api/tasks/{id}/activity/:
+    get:
+      operationId: tasks_activity_retrieve
+      description: GET /api/tasks/<pk>/activity/  — task activity feed
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - tasks
+      responses:
+        '200':
+          description: No response body
+  /api/tasks/{id}/assignments/:
+    get:
+      operationId: tasks_assignments_retrieve
+      description: |-
+        GET  /api/tasks/<uuid>/assignments/ — list co-assignees
+        POST /api/tasks/<uuid>/assignments/ — add a co-assignee
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - tasks
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: tasks_assignments_create
+      description: |-
+        GET  /api/tasks/<uuid>/assignments/ — list co-assignees
+        POST /api/tasks/<uuid>/assignments/ — add a co-assignee
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - tasks
+      responses:
+        '200':
+          description: No response body
+  /api/tasks/{id}/assignments/{user_id}/:
+    delete:
+      operationId: tasks_assignments_destroy
+      description: DELETE /api/tasks/<uuid>/assignments/<user_id>/ — remove a co-assignee
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      - in: path
+        name: user_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - tasks
+      responses:
+        '204':
+          description: No response body
+  /api/tasks/{id}/attachments/:
+    get:
+      operationId: tasks_attachments_retrieve
+      description: |-
+        GET  /api/tasks/<pk>/attachments/  — list task attachments
+        POST /api/tasks/<pk>/attachments/  — upload a file (multipart/form-data)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - tasks
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: tasks_attachments_create
+      description: |-
+        GET  /api/tasks/<pk>/attachments/  — list task attachments
+        POST /api/tasks/<pk>/attachments/  — upload a file (multipart/form-data)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - tasks
+      responses:
+        '200':
+          description: No response body
+  /api/tasks/{id}/comments/:
+    get:
+      operationId: tasks_comments_retrieve
+      description: |-
+        GET  /api/tasks/<pk>/comments/  — list non-deleted comments
+        POST /api/tasks/<pk>/comments/  — add a comment
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - tasks
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: tasks_comments_create
+      description: |-
+        GET  /api/tasks/<pk>/comments/  — list non-deleted comments
+        POST /api/tasks/<pk>/comments/  — add a comment
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - tasks
+      responses:
+        '200':
+          description: No response body
+  /api/tasks/{id}/custom-field-values/:
+    get:
+      operationId: tasks_custom_field_values_retrieve
+      description: GET /api/tasks/<pk>/custom-field-values/  — list all values for
+        task
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - tasks
+      responses:
+        '200':
+          description: No response body
+  /api/tasks/{id}/custom-field-values/{field_id}/:
+    put:
+      operationId: tasks_custom_field_values_update
+      description: PUT /api/tasks/<pk>/custom-field-values/<field_id>/  — set value
+      parameters:
+      - in: path
+        name: field_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - tasks
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: tasks_custom_field_values_destroy
+      description: PUT /api/tasks/<pk>/custom-field-values/<field_id>/  — set value
+      parameters:
+      - in: path
+        name: field_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - tasks
+      responses:
+        '204':
+          description: No response body
+  /api/tasks/{id}/dependencies/:
+    get:
+      operationId: tasks_dependencies_retrieve
+      description: |-
+        GET  /api/tasks/<uuid>/dependencies/ — list dependencies
+        POST /api/tasks/<uuid>/dependencies/ — add a dependency
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - tasks
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: tasks_dependencies_create
+      description: |-
+        GET  /api/tasks/<uuid>/dependencies/ — list dependencies
+        POST /api/tasks/<uuid>/dependencies/ — add a dependency
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - tasks
+      responses:
+        '200':
+          description: No response body
+  /api/tasks/{id}/dependencies/{dep_id}/:
+    patch:
+      operationId: tasks_dependencies_partial_update
+      description: |-
+        PATCH  /api/tasks/<uuid>/dependencies/<dep_id>/ — update dependency type
+        DELETE /api/tasks/<uuid>/dependencies/<dep_id>/ — remove a dependency
+      parameters:
+      - in: path
+        name: dep_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - tasks
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: tasks_dependencies_destroy
+      description: |-
+        PATCH  /api/tasks/<uuid>/dependencies/<dep_id>/ — update dependency type
+        DELETE /api/tasks/<uuid>/dependencies/<dep_id>/ — remove a dependency
+      parameters:
+      - in: path
+        name: dep_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - tasks
+      responses:
+        '204':
+          description: No response body
+  /api/tasks/{id}/guest-access/:
+    get:
+      operationId: tasks_guest_access_retrieve
+      description: |-
+        GET  /api/tasks/<uuid>/guest-access/ — list users with guest access
+        POST /api/tasks/<uuid>/guest-access/ — grant guest access
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - tasks
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: tasks_guest_access_create
+      description: |-
+        GET  /api/tasks/<uuid>/guest-access/ — list users with guest access
+        POST /api/tasks/<uuid>/guest-access/ — grant guest access
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - tasks
+      responses:
+        '200':
+          description: No response body
+  /api/tasks/{id}/guest-access/{user_id}/:
+    delete:
+      operationId: tasks_guest_access_destroy
+      description: DELETE /api/tasks/<uuid>/guest-access/<user_id>/ — revoke guest
+        access
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      - in: path
+        name: user_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - tasks
+      responses:
+        '204':
+          description: No response body
+  /api/tasks/{id}/labels/:
+    get:
+      operationId: tasks_labels_retrieve
+      description: |-
+        GET  /api/tasks/<uuid>/labels/ — list labels on a task
+        POST /api/tasks/<uuid>/labels/ — attach a label to a task
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - tasks
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: tasks_labels_create
+      description: |-
+        GET  /api/tasks/<uuid>/labels/ — list labels on a task
+        POST /api/tasks/<uuid>/labels/ — attach a label to a task
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - tasks
+      responses:
+        '200':
+          description: No response body
+  /api/tasks/{id}/labels/{label_id}/:
+    delete:
+      operationId: tasks_labels_destroy
+      description: DELETE /api/tasks/<uuid>/labels/<label_id>/ — detach a label from
+        a task
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      - in: path
+        name: label_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - tasks
+      responses:
+        '204':
+          description: No response body
+  /api/tasks/{id}/move-column/:
+    post:
+      operationId: tasks_move_column_create
+      description: POST /api/tasks/<pk>/move-column/ — move task to a board column
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - tasks
+      responses:
+        '200':
+          description: No response body
+  /api/tasks/{id}/restore/:
+    post:
+      operationId: tasks_restore_create
+      description: POST /api/tasks/<pk>/restore/ — restore a soft-deleted task
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - tasks
+      responses:
+        '200':
+          description: No response body
+  /api/tasks/{id}/subtasks/:
+    get:
+      operationId: tasks_subtasks_retrieve
+      description: GET /api/tasks/<uuid>/subtasks/ — list subtasks of a task
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - tasks
+      responses:
+        '200':
+          description: No response body
+  /api/tasks/{id}/time-logs/:
+    get:
+      operationId: tasks_time_logs_retrieve
+      description: |-
+        GET  /api/tasks/<pk>/time-logs/  — list time logs
+        POST /api/tasks/<pk>/time-logs/  — create time log (min role: DEV)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - tasks
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: tasks_time_logs_create
+      description: |-
+        GET  /api/tasks/<pk>/time-logs/  — list time logs
+        POST /api/tasks/<pk>/time-logs/  — create time log (min role: DEV)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - tasks
+      responses:
+        '200':
+          description: No response body
+  /api/tasks/my/:
+    get:
+      operationId: tasks_my_retrieve
+      description: |-
+        GET /api/tasks/my/ — tasks assigned to the current user across all projects.
+        Excludes cancelled and deleted tasks.
+
+        Query params:
+          status: comma-separated list of statuses to filter by
+      tags:
+      - tasks
+      responses:
+        '200':
+          description: No response body
+  /api/tasks/search/:
+    get:
+      operationId: tasks_search_retrieve
+      description: |-
+        GET /api/tasks/search/?q=<query>
+        Cross-project full-text search across all projects the caller can access.
+        Returns up to 20 matching tasks ordered by relevance (recency).
+      tags:
+      - tasks
+      responses:
+        '200':
+          description: No response body
+  /api/tasks/today/:
+    get:
+      operationId: tasks_today_retrieve
+      description: |-
+        GET /api/tasks/today/
+
+        Returns tasks assigned to the authenticated user due within ±3 days,
+        including overdue. Cancelled and deleted tasks are excluded.
+      tags:
+      - tasks
+      responses:
+        '200':
+          description: No response body
+  /api/time-logs/{id}/:
+    patch:
+      operationId: time_logs_partial_update
+      description: |-
+        PATCH  /api/time-logs/<pk>/  — update time log (owner or SA)
+        DELETE /api/time-logs/<pk>/  — delete time log (owner or SA)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - time-logs
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: time_logs_destroy
+      description: |-
+        PATCH  /api/time-logs/<pk>/  — update time log (owner or SA)
+        DELETE /api/time-logs/<pk>/  — delete time log (owner or SA)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - time-logs
+      responses:
+        '204':
+          description: No response body
+  /api/users/:
+    get:
+      operationId: users_retrieve
+      description: GET /api/users/  — list all users (SA/GA only)
+      tags:
+      - users
+      responses:
+        '200':
+          description: No response body
+  /api/users/{id}/:
+    get:
+      operationId: users_retrieve_2
+      description: |-
+        GET    /api/users/<pk>/  — retrieve a user
+        PATCH  /api/users/<pk>/  — update profile (own account or SA)
+        DELETE /api/users/<pk>/  — deactivate user (SA only)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - users
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: users_partial_update
+      description: |-
+        GET    /api/users/<pk>/  — retrieve a user
+        PATCH  /api/users/<pk>/  — update profile (own account or SA)
+        DELETE /api/users/<pk>/  — deactivate user (SA only)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - users
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: users_destroy
+      description: |-
+        GET    /api/users/<pk>/  — retrieve a user
+        PATCH  /api/users/<pk>/  — update profile (own account or SA)
+        DELETE /api/users/<pk>/  — deactivate user (SA only)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - users
+      responses:
+        '204':
+          description: No response body
+  /api/users/{id}/metrics/:
+    get:
+      operationId: users_metrics_retrieve
+      description: GET /api/users/<pk>/metrics/
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - users
+      responses:
+        '200':
+          description: No response body
+  /api/users/{id}/preferences/:
+    get:
+      operationId: users_preferences_retrieve
+      description: |-
+        GET /api/users/<pk>/preferences/  — retrieve preferences
+        PUT /api/users/<pk>/preferences/  — replace preferences
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - users
+      responses:
+        '200':
+          description: No response body
+    put:
+      operationId: users_preferences_update
+      description: |-
+        GET /api/users/<pk>/preferences/  — retrieve preferences
+        PUT /api/users/<pk>/preferences/  — replace preferences
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - users
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: users_preferences_partial_update
+      description: |-
+        GET /api/users/<pk>/preferences/  — retrieve preferences
+        PUT /api/users/<pk>/preferences/  — replace preferences
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - users
+      responses:
+        '200':
+          description: No response body
+  /api/users/{id}/sessions/:
+    get:
+      operationId: users_sessions_retrieve
+      description: GET /api/users/<pk>/sessions/   DELETE /api/users/<pk>/sessions/
+        (revoke all others)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - users
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: users_sessions_destroy
+      description: GET /api/users/<pk>/sessions/   DELETE /api/users/<pk>/sessions/
+        (revoke all others)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - users
+      responses:
+        '204':
+          description: No response body
+  /api/users/{id}/sessions/{session_id}/:
+    delete:
+      operationId: users_sessions_destroy_2
+      description: DELETE /api/users/<pk>/sessions/<session_id>/
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      - in: path
+        name: session_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - users
+      responses:
+        '204':
+          description: No response body
+  /api/users/me:
+    get:
+      operationId: users_me_retrieve
+      description: |-
+        GET /api/users/me
+
+        Returns the authenticated user's profile.
+      tags:
+      - users
+      responses:
+        '200':
+          description: No response body
+  /api/workspaces/:
+    get:
+      operationId: workspaces_retrieve
+      description: |-
+        GET  /api/workspaces/  — list current user's workspaces
+        POST /api/workspaces/  — create a workspace
+      tags:
+      - workspaces
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: workspaces_create
+      description: |-
+        GET  /api/workspaces/  — list current user's workspaces
+        POST /api/workspaces/  — create a workspace
+      tags:
+      - workspaces
+      responses:
+        '200':
+          description: No response body
+  /api/workspaces/{slug}/:
+    get:
+      operationId: workspaces_retrieve_2
+      description: |-
+        GET    /api/workspaces/<slug>/  — retrieve workspace details
+        PATCH  /api/workspaces/<slug>/  — update metadata (owner or SA)
+        DELETE /api/workspaces/<slug>/  — delete workspace (SA only)
+      parameters:
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - workspaces
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: workspaces_partial_update
+      description: |-
+        GET    /api/workspaces/<slug>/  — retrieve workspace details
+        PATCH  /api/workspaces/<slug>/  — update metadata (owner or SA)
+        DELETE /api/workspaces/<slug>/  — delete workspace (SA only)
+      parameters:
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - workspaces
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: workspaces_destroy
+      description: |-
+        GET    /api/workspaces/<slug>/  — retrieve workspace details
+        PATCH  /api/workspaces/<slug>/  — update metadata (owner or SA)
+        DELETE /api/workspaces/<slug>/  — delete workspace (SA only)
+      parameters:
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - workspaces
+      responses:
+        '204':
+          description: No response body
+  /api/workspaces/{slug}/labels/:
+    get:
+      operationId: workspaces_labels_retrieve
+      description: |-
+        GET  /api/workspaces/<slug>/labels/  — list workspace labels
+        POST /api/workspaces/<slug>/labels/  — create a label
+      parameters:
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - workspaces
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: workspaces_labels_create
+      description: |-
+        GET  /api/workspaces/<slug>/labels/  — list workspace labels
+        POST /api/workspaces/<slug>/labels/  — create a label
+      parameters:
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - workspaces
+      responses:
+        '200':
+          description: No response body
+  /api/workspaces/{slug}/labels/{label_id}/:
+    patch:
+      operationId: workspaces_labels_partial_update
+      description: |-
+        PATCH  /api/workspaces/<slug>/labels/<uuid>/  — update a label
+        DELETE /api/workspaces/<slug>/labels/<uuid>/  — delete a label
+      parameters:
+      - in: path
+        name: label_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - workspaces
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: workspaces_labels_destroy
+      description: |-
+        PATCH  /api/workspaces/<slug>/labels/<uuid>/  — update a label
+        DELETE /api/workspaces/<slug>/labels/<uuid>/  — delete a label
+      parameters:
+      - in: path
+        name: label_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - workspaces
+      responses:
+        '204':
+          description: No response body
+  /api/workspaces/{slug}/members/:
+    get:
+      operationId: workspaces_members_retrieve
+      description: |-
+        GET  /api/workspaces/<slug>/members/  — list workspace members
+        POST /api/workspaces/<slug>/members/  — add a member
+      parameters:
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - workspaces
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: workspaces_members_create
+      description: |-
+        GET  /api/workspaces/<slug>/members/  — list workspace members
+        POST /api/workspaces/<slug>/members/  — add a member
+      parameters:
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - workspaces
+      responses:
+        '200':
+          description: No response body
+  /api/workspaces/{slug}/members/{user_id}/:
+    delete:
+      operationId: workspaces_members_destroy
+      description: DELETE /api/workspaces/<slug>/members/<user_id>/  — remove a member
+      parameters:
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      - in: path
+        name: user_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - workspaces
+      responses:
+        '204':
+          description: No response body
+  /api/workspaces/{slug}/projects/:
+    get:
+      operationId: workspaces_projects_retrieve
+      description: |-
+        GET  /api/workspaces/<slug>/projects/  — list projects in a workspace
+        POST /api/workspaces/<slug>/projects/  — create a project
+      parameters:
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - workspaces
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: workspaces_projects_create
+      description: |-
+        GET  /api/workspaces/<slug>/projects/  — list projects in a workspace
+        POST /api/workspaces/<slug>/projects/  — create a project
+      parameters:
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - workspaces
+      responses:
+        '200':
+          description: No response body
+components: {}

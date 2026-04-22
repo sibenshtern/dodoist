@@ -12,6 +12,7 @@ urlpatterns = [
     path("", include("tasks.urls")),
     path("", include("projects.urls")),
     path("", include("analytics.urls")),
+    path("", include("realtime.urls")),
 ]
 
 if settings.DEBUG:

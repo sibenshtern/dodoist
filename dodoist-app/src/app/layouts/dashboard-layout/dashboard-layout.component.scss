@@ -83,6 +83,11 @@ $font-b: 'Manrope', sans-serif;
 
 // ── Workspace switcher ────────────────────────────────────────────────────────
 
+.workspace-switcher-wrap {
+  position: relative;
+  margin-bottom: 16px;
+}
+
 .workspace-switcher {
   display: flex;
   align-items: center;
@@ -94,11 +99,70 @@ $font-b: 'Manrope', sans-serif;
   border-radius: 8px;
   cursor: pointer;
   text-align: left;
-  margin-bottom: 16px;
   transition: background 0.12s, border-color 0.12s;
 
   &:hover { background: $bg-page; border-color: #ccc9c4; }
 }
+
+.workspace-chevron {
+  &.flipped { transform: rotate(180deg); }
+  transition: transform 0.15s;
+}
+
+.ws-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: $white;
+  border: 1.111px solid $border;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.10);
+  z-index: 200;
+  overflow: hidden;
+}
+
+.ws-dropdown__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  background: transparent;
+  border: none;
+  font-family: $font-b;
+  font-size: 13px;
+  color: $dark;
+  cursor: pointer;
+  text-decoration: none;
+  text-align: left;
+
+  &:hover { background: $bg-page; }
+
+  &--active { font-weight: 600; }
+}
+
+.ws-dropdown__initial {
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  background: $dark;
+  color: $white;
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.ws-dropdown__name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.ws-dropdown__check { color: $red; font-size: 14px; }
+
+.ws-dropdown__divider { height: 1px; background: $border; margin: 2px 0; }
+
+.ws-dropdown__manage { color: $gray; font-size: 12px; }
 
 .workspace-icon {
   width: 28px;
@@ -135,12 +199,6 @@ $font-b: 'Manrope', sans-serif;
 .workspace-plan {
   font-size: 11px;
   color: $gray;
-}
-
-.workspace-chevron {
-  flex-shrink: 0;
-  color: $gray-lt;
-  font-size: 14px;
 }
 
 // ── Search trigger ────────────────────────────────────────────────────────────

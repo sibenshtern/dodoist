@@ -12,7 +12,9 @@ from .models import (
     ProjectType,
     SprintStatus,
     Workspace,
+    WorkspaceInvitation,
     WorkspacePlan,
+    WorkspaceRole,
 )
 
 
@@ -41,6 +43,8 @@ class WorkspaceSerializer(serializers.ModelSerializer):
             "is_personal",
             "created_at",
             "updated_at",
+            "deleted_at",
+            "delete_scheduled_for",
         ]
 
 
@@ -48,7 +52,6 @@ class WorkspaceCreateSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=255)
     slug = serializers.SlugField(max_length=100, required=False, default="")
     description = serializers.CharField(required=False, allow_blank=True, default="")
-    plan = serializers.ChoiceField(choices=WorkspacePlan.choices, default=WorkspacePlan.FREE)
 
     def validate_slug(self, value):
         if value and Workspace.objects.filter(slug=value).exists():
@@ -59,7 +62,6 @@ class WorkspaceCreateSerializer(serializers.Serializer):
 class WorkspaceUpdateSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=255, required=False)
     description = serializers.CharField(required=False, allow_blank=True)
-    plan = serializers.ChoiceField(choices=WorkspacePlan.choices, required=False)
 
     def update(self, instance: Workspace, validated_data: dict) -> Workspace:
         fields_to_save = []
@@ -74,7 +76,35 @@ class WorkspaceUpdateSerializer(serializers.Serializer):
 class WorkspaceMemberSerializer(serializers.Serializer):
     id = serializers.UUIDField()
     user = UserBriefSerializer()
+    role = serializers.ChoiceField(choices=WorkspaceRole.choices)
     joined_at = serializers.DateTimeField()
+
+
+class WorkspaceInvitationSerializer(serializers.Serializer):
+    id = serializers.UUIDField()
+    kind = serializers.CharField()
+    email = serializers.EmailField(allow_blank=True)
+    role_to_grant = serializers.CharField()
+    invited_by = UserBriefSerializer(allow_null=True)
+    created_at = serializers.DateTimeField()
+    expires_at = serializers.DateTimeField(allow_null=True)
+    max_uses = serializers.IntegerField(allow_null=True)
+    use_count = serializers.IntegerField()
+    accepted_at = serializers.DateTimeField(allow_null=True)
+    revoked_at = serializers.DateTimeField(allow_null=True)
+
+
+class WorkspaceMemberAddSerializer(serializers.Serializer):
+    user_id = serializers.UUIDField()
+    role = serializers.ChoiceField(
+        choices=[WorkspaceRole.ADMIN, WorkspaceRole.MEMBER],
+        required=False,
+        default=WorkspaceRole.MEMBER,
+    )
+
+
+class WorkspaceMemberUpdateSerializer(serializers.Serializer):
+    role = serializers.ChoiceField(choices=[WorkspaceRole.ADMIN, WorkspaceRole.MEMBER])
 
 
 # ---------------------------------------------------------------------------

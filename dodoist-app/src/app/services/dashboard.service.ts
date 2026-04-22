@@ -145,6 +145,11 @@ export class DashboardService {
     ).pipe(map(results => results.flat()));
   }
 
+  /** Fetch projects for a single active workspace. */
+  getProjectsForActiveWorkspace(slug: string): Observable<ProjectSummary[]> {
+    return this.getProjects(slug).pipe(catchError(() => of([])));
+  }
+
   getProjects(workspaceSlug: string): Observable<ProjectSummary[]> {
     return this.http
       .get<ApiProject[]>(`${environment.apiBase}/api/workspaces/${workspaceSlug}/projects/`)

@@ -21,6 +21,7 @@ from .models import (
     Workspace,
     WorkspaceMember,
     WorkspacePlan,
+    WorkspaceRole,
 )
 
 _DEFAULT_COLUMNS = [
@@ -59,37 +60,136 @@ class WorkspaceService:
             owner=user,
             is_personal=True,
         )
-        WorkspaceMember.objects.create(workspace=ws, user=user)
+        WorkspaceMember.objects.create(workspace=ws, user=user, role=WorkspaceRole.OWNER)
+        if not user.active_workspace_id:
+            user.active_workspace = ws
+            user.save(update_fields=["active_workspace"])
         return ws
 
     @staticmethod
     @transaction.atomic
-    def create_workspace(
+    def create_team_workspace(
         owner: User,
         name: str,
         slug: str | None = None,
         description: str = "",
-        plan: str = WorkspacePlan.FREE,
+        plan: str = "",  # kept for backward-compat; no longer applied
     ) -> Workspace:
         slug = slug or _unique_slug(name)
         if Workspace.objects.filter(slug=slug).exists():
             raise ValueError(f"Slug '{slug}' is already taken.")
         ws = Workspace.objects.create(
-            slug=slug, name=name, owner=owner, description=description, plan=plan
+            slug=slug, name=name, owner=owner, description=description
         )
-        WorkspaceMember.objects.create(workspace=ws, user=owner)
+        WorkspaceMember.objects.create(workspace=ws, user=owner, role=WorkspaceRole.OWNER)
+        owner.active_workspace = ws
+        owner.save(update_fields=["active_workspace"])
         return ws
 
+    # Keep old name as alias so existing callers don't break.
+    create_workspace = create_team_workspace
+
     @staticmethod
-    def add_member(workspace: Workspace, user: User) -> WorkspaceMember:
-        member, _ = WorkspaceMember.objects.get_or_create(workspace=workspace, user=user)
+    @transaction.atomic
+    def add_member(
+        workspace: Workspace,
+        user: User,
+        role: str = WorkspaceRole.MEMBER,
+        invited_by: User | None = None,
+    ) -> WorkspaceMember:
+        if role == WorkspaceRole.OWNER:
+            raise ValueError("Use transfer_ownership to assign the Owner role.")
+        member, _ = WorkspaceMember.objects.update_or_create(
+            workspace=workspace,
+            user=user,
+            defaults={"role": role, "invited_by": invited_by},
+        )
         return member
 
     @staticmethod
-    def remove_member(workspace: Workspace, user: User) -> None:
+    @transaction.atomic
+    def remove_member(workspace: Workspace, user: User) -> int:
         if workspace.owner_id == user.pk:
             raise ValueError("Cannot remove the workspace owner.")
         WorkspaceMember.objects.filter(workspace=workspace, user=user).delete()
+        # Cascade: remove all project memberships in this workspace.
+        removed = ProjectMember.objects.filter(
+            project__workspace=workspace, user=user
+        ).delete()
+        return removed[0]
+
+    @staticmethod
+    @transaction.atomic
+    def change_role(workspace: Workspace, user: User, new_role: str, actor: User) -> WorkspaceMember:
+        if new_role == WorkspaceRole.OWNER:
+            raise ValueError("Use transfer_ownership to assign the Owner role.")
+        if workspace.owner_id == user.pk:
+            raise ValueError("Cannot change the role of the workspace owner.")
+        if workspace.owner_id != actor.pk:
+            actor_member = WorkspaceMember.objects.filter(workspace=workspace, user=actor).first()
+            if not actor_member or actor_member.role != WorkspaceRole.ADMIN:
+                raise ValueError("Only Owner or Admin can change member roles.")
+        member = WorkspaceMember.objects.filter(workspace=workspace, user=user).first()
+        if not member:
+            raise ValueError("User is not a workspace member.")
+        member.role = new_role
+        member.save(update_fields=["role"])
+        return member
+
+    @staticmethod
+    @transaction.atomic
+    def transfer_ownership(workspace: Workspace, new_owner: User, actor: User) -> Workspace:
+        if workspace.owner_id != actor.pk:
+            raise ValueError("Only the current owner can transfer ownership.")
+        new_owner_member = WorkspaceMember.objects.filter(workspace=workspace, user=new_owner).first()
+        if not new_owner_member:
+            raise ValueError("New owner must already be a workspace member.")
+        # Demote old owner to Admin.
+        WorkspaceMember.objects.filter(workspace=workspace, user=actor).update(role=WorkspaceRole.ADMIN)
+        # Promote new owner.
+        new_owner_member.role = WorkspaceRole.OWNER
+        new_owner_member.save(update_fields=["role"])
+        workspace.owner = new_owner
+        workspace.save(update_fields=["owner", "updated_at"])
+        return workspace
+
+    @staticmethod
+    @transaction.atomic
+    def soft_delete(workspace: Workspace, actor: User) -> Workspace:
+        if workspace.is_personal:
+            raise ValueError("Personal workspaces cannot be deleted.")
+        if workspace.owner_id != actor.pk:
+            raise ValueError("Only the workspace owner can delete it.")
+        if workspace.is_deleted():
+            raise ValueError("Workspace is already scheduled for deletion.")
+        now = timezone.now()
+        workspace.deleted_at = now
+        workspace.deleted_by = actor
+        workspace.delete_scheduled_for = now + timezone.timedelta(days=30)
+        workspace.save(update_fields=["deleted_at", "deleted_by", "delete_scheduled_for", "updated_at"])
+        return workspace
+
+    @staticmethod
+    @transaction.atomic
+    def restore(workspace: Workspace, actor: User) -> Workspace:
+        if workspace.owner_id != actor.pk:
+            raise ValueError("Only the workspace owner can restore it.")
+        if not workspace.is_deleted():
+            raise ValueError("Workspace is not scheduled for deletion.")
+        if workspace.delete_scheduled_for and timezone.now() > workspace.delete_scheduled_for:
+            raise ValueError("Grace period has elapsed; workspace cannot be restored.")
+        workspace.deleted_at = None
+        workspace.deleted_by = None
+        workspace.delete_scheduled_for = None
+        workspace.save(update_fields=["deleted_at", "deleted_by", "delete_scheduled_for", "updated_at"])
+        return workspace
+
+    @staticmethod
+    @transaction.atomic
+    def leave(workspace: Workspace, user: User) -> int:
+        if workspace.owner_id == user.pk:
+            raise ValueError("Owner must transfer ownership before leaving the workspace.")
+        return WorkspaceService.remove_member(workspace, user)
 
 
 class ProjectService:
@@ -167,6 +267,7 @@ class ProjectService:
         return project
 
     @staticmethod
+    @transaction.atomic
     def add_member(project: Project, user: User, role: str, added_by: User | None = None) -> ProjectMember:
         if role not in ProjectRole.values:
             raise ValueError(f"Invalid role '{role}'. Choices: {ProjectRole.values}")
@@ -200,6 +301,7 @@ class ProjectService:
         return member
 
     @staticmethod
+    @transaction.atomic
     def remove_member(project: Project, user: User) -> None:
         membership = ProjectMember.objects.filter(project=project, user=user).first()
         if membership and membership.role == ProjectRole.PO:
@@ -209,12 +311,14 @@ class ProjectService:
 
 class SprintService:
     @staticmethod
+    @transaction.atomic
     def create_sprint(project: Project, creator: User, name: str, goal: str = "") -> Sprint:
         if project.type != ProjectType.SCRUM:
             raise ValueError("Sprints are only available for Scrum projects.")
         return Sprint.objects.create(project=project, created_by=creator, name=name, goal=goal)
 
     @staticmethod
+    @transaction.atomic
     def start_sprint(sprint: Sprint) -> Sprint:
         if sprint.status != SprintStatus.PLANNED:
             raise ValueError("Only planned sprints can be started.")
@@ -225,6 +329,7 @@ class SprintService:
         return sprint
 
     @staticmethod
+    @transaction.atomic
     def complete_sprint(sprint: Sprint) -> Sprint:
         if sprint.status != SprintStatus.ACTIVE:
             raise ValueError("Only active sprints can be completed.")

@@ -41,6 +41,11 @@ export const routes: Routes = [
     loadComponent: () =>
       import('./pages/reset-password/reset-password.component').then(m => m.ResetPasswordComponent),
   },
+  {
+    path: 'invites/:token',
+    loadComponent: () =>
+      import('./pages/invite-accept/invite-accept.component').then(m => m.InviteAcceptComponent),
+  },
   // ── Dashboard shell — all authenticated pages live here ──────────────────
   {
     path: '',
@@ -89,6 +94,41 @@ export const routes: Routes = [
         path: 'projects/:id',
         loadComponent: () =>
           import('./pages/project-detail/project-detail.component').then(m => m.ProjectDetailComponent),
+      },
+      {
+        path: 'projects/:id/board',
+        loadComponent: () =>
+          import('./pages/project-board/project-board.component').then(m => m.ProjectBoardComponent),
+      },
+      {
+        path: 'projects/:id/backlog',
+        loadComponent: () =>
+          import('./pages/project-backlog/project-backlog.component').then(m => m.ProjectBacklogComponent),
+      },
+      {
+        path: 'projects/:id/analytics',
+        loadComponent: () =>
+          import('./pages/project-analytics/project-analytics.component').then(m => m.ProjectAnalyticsComponent),
+      },
+      {
+        path: 'projects/:id/sprints/:sprintId',
+        loadComponent: () =>
+          import('./pages/project-sprint-detail/project-sprint-detail.component').then(m => m.ProjectSprintDetailComponent),
+      },
+      {
+        path: 'workspaces',
+        loadComponent: () =>
+          import('./pages/workspaces/workspaces.component').then(m => m.WorkspacesComponent),
+      },
+      {
+        path: 'workspaces/:slug',
+        loadComponent: () =>
+          import('./pages/workspace-detail/workspace-detail.component').then(m => m.WorkspaceDetailComponent),
+      },
+      {
+        path: 'workspaces/:slug/members',
+        loadComponent: () =>
+          import('./pages/workspace-members/workspace-members.component').then(m => m.WorkspaceMembersComponent),
       },
       {
         path: 'notifications',

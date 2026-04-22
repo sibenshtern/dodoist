@@ -1,0 +1,36 @@
+@startuml Task Creation Flow
+
+title Создание задачи в проекте
+
+actor user as "Пользователь"
+boundary frontend as "Фронтенд"
+control backend as "Модуль создания задач"
+database database as "База данных"
+
+user -> frontend: Заполнить форму создания задачи и нажать "Создать"
+activate user
+activate frontend
+frontend -> backend: POST /api/tasks/
+activate backend
+
+backend -> database: Проверить, является ли пользователь участником проекта
+
+alt Не член проекта
+    backend --> frontend: 403 Forbidden
+    frontend --> user: "Доступ запрещен"
+else Член проекта
+    alt Проект не выбран
+        backend -> database: Получить или создать личный проект
+    end
+
+    backend -> database: Создать и сохранить задачу
+    backend -> database: Записать активность
+
+    backend --> frontend: 201 Created
+    deactivate backend
+    frontend --> user: Задача появляется в списке задач
+    deactivate user
+    deactivate frontend
+end
+
+@enduml

@@ -2,6 +2,7 @@ import hashlib
 import secrets
 from datetime import timedelta
 
+from django.conf import settings
 from django.contrib.auth import authenticate
 from django.db import models
 from django.shortcuts import get_object_or_404
@@ -55,6 +56,7 @@ class RegisterView(APIView):
                 password=data["password"],
                 display_name=data["display_name"],
                 user_timezone=data.get("timezone", "UTC"),
+                invite_token=data.get("invite_token") or request.data.get("invite_token"),
             )
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=400)
@@ -87,6 +89,11 @@ class LoginView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
+        from users.throttling import LoginRateThrottle
+        throttle = LoginRateThrottle()
+        if not throttle.allow_request(request, self):
+            return Response({"detail": "Too many login attempts. Try again later."}, status=429)
+
         serializer = LoginSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
@@ -117,8 +124,9 @@ class RefreshView(APIView):
     """
     POST /api/auth/refresh
 
-    Exchanges the HttpOnly refresh token cookie for a new short-lived access token.
-    No Authorization header required.
+    Exchanges the HttpOnly refresh token cookie for new access + refresh tokens
+    (full rotation). If a previously-rotated refresh token is replayed, the
+    session is revoked (refresh token reuse detection).
     """
     authentication_classes = []
     permission_classes = [AllowAny]
@@ -129,6 +137,24 @@ class RefreshView(APIView):
             return Response({"detail": "No refresh token."}, status=401)
 
         refresh_hash = hashlib.sha256(raw_refresh.encode()).hexdigest()
+
+        # Reuse-detection: if the presented hash matches a previous (already-rotated)
+        # hash, treat it as a stolen token and revoke the entire session.
+        try:
+            stale_session = (
+                UserSession.objects
+                .get(previous_refresh_token_hash=refresh_hash)
+            )
+            stale_session.delete()
+            response = Response(
+                {"detail": "Session compromised. Please log in again."},
+                status=401,
+            )
+            response.delete_cookie(REFRESH_COOKIE_NAME)
+            return response
+        except UserSession.DoesNotExist:
+            pass
+
         try:
             session = (
                 UserSession.objects
@@ -145,19 +171,35 @@ class RefreshView(APIView):
         if not session.user.is_active:
             return Response({"detail": "User account is disabled."}, status=403)
 
-        # Issue a new access token
+        # Rotate both access and refresh tokens
         new_raw_access = secrets.token_hex(32)
         new_access_hash = hashlib.sha256(new_raw_access.encode()).hexdigest()
         new_expires_at = timezone.now() + timedelta(minutes=ACCESS_TOKEN_MINUTES)
-        UserService.rotate_access_token(session, new_access_hash, new_expires_at)
 
-        return Response(
+        new_raw_refresh = secrets.token_hex(32)
+        new_refresh_hash = hashlib.sha256(new_raw_refresh.encode()).hexdigest()
+        new_refresh_expires = timezone.now() + timedelta(days=REFRESH_TOKEN_DAYS)
+
+        session.previous_refresh_token_hash = refresh_hash  # keep old for reuse detection
+        session.token_hash = new_access_hash
+        session.expires_at = new_expires_at
+        session.refresh_token_hash = new_refresh_hash
+        session.refresh_expires_at = new_refresh_expires
+        session.save(update_fields=[
+            "token_hash", "expires_at",
+            "refresh_token_hash", "refresh_expires_at",
+            "previous_refresh_token_hash",
+        ])
+
+        response = Response(
             {
                 "access_token": new_raw_access,
                 "expires_in": ACCESS_TOKEN_MINUTES * 60,
             },
             status=200,
         )
+        _set_refresh_cookie(response, new_raw_refresh)
+        return response
 
 
 class LogoutView(APIView):
@@ -181,12 +223,46 @@ class MeView(APIView):
     """
     GET /api/users/me
 
-    Returns the authenticated user's profile.
+    Returns the authenticated user's profile, including active_workspace.
     """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        return Response(UserProfileSerializer(request.user).data)
+        user = request.user
+        data = UserProfileSerializer(user).data
+        ws = user.active_workspace
+        data["active_workspace"] = (
+            {"id": str(ws.pk), "slug": ws.slug, "name": ws.name, "is_personal": ws.is_personal}
+            if ws else None
+        )
+        return Response(data)
+
+
+class SetActiveWorkspaceView(APIView):
+    """
+    PATCH /api/users/me/active-workspace/  — switch the user's active workspace
+    """
+
+    def patch(self, request):
+        slug = request.data.get("workspace_slug") or request.data.get("slug")
+        ws_id = request.data.get("workspace_id") or request.data.get("id")
+        if not slug and not ws_id:
+            return Response({"detail": "workspace_slug or workspace_id is required."}, status=400)
+        try:
+            from projects.models import Workspace
+            if slug:
+                workspace = Workspace.objects.get(slug=slug)
+            else:
+                workspace = Workspace.objects.get(pk=ws_id)
+        except (Workspace.DoesNotExist, ValueError):
+            return Response({"detail": "Workspace not found."}, status=404)
+        try:
+            UserService.set_active_workspace(request.user, workspace)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=400)
+        data = UserProfileSerializer(request.user).data
+        data["active_workspace"] = {"id": str(workspace.pk), "slug": workspace.slug, "name": workspace.name, "is_personal": workspace.is_personal}
+        return Response(data)
 
 
 class UserListView(APIView):
@@ -219,8 +295,15 @@ class UserDetailView(APIView):
 
     def get(self, request, pk):
         user = self._get_user_or_404(pk)
-        # SA/GA can view anyone; regular users can view workspace members (simplified: allow all authenticated)
-        return Response(UserListSerializer(user).data)
+        is_own = user.pk == request.user.pk
+        if is_own or request.user.has_elevated_access():
+            return Response(UserListSerializer(user).data)
+        # Other users only see a minimal public profile (no email)
+        return Response({
+            "id": str(user.pk),
+            "display_name": user.display_name,
+            "avatar_url": user.avatar_url,
+        })
 
     def patch(self, request, pk):
         target = self._get_user_or_404(pk)
@@ -238,12 +321,12 @@ class UserDetailView(APIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
-        # Password change via headers
-        current_password = request.META.get("HTTP_X_CURRENT_PASSWORD")
-        new_password = request.META.get("HTTP_X_NEW_PASSWORD")
+        # Password change via request body (not headers — headers appear in proxy logs)
+        current_password = request.data.get("current_password")
+        new_password = request.data.get("new_password")
         if new_password:
             if not is_sa and not current_password:
-                return Response({"detail": "X-Current-Password header required."}, status=400)
+                return Response({"detail": "current_password is required."}, status=400)
             if not is_sa and not target.check_password(current_password):
                 return Response({"detail": "Current password is incorrect."}, status=400)
             if len(new_password) < 8:
@@ -288,16 +371,11 @@ class UserPreferencesView(APIView):
         target, err = self._check_access(request, pk)
         if err:
             return err
-        serializer = UserPreferencesUpdateSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        data = serializer.validated_data
         prefs = get_object_or_404(UserPreferences, user=target)
-        # PUT = full replace: set defaults for omitted fields
-        prefs.theme = data.get("theme", "system")
-        prefs.language = data.get("language", "en")
-        prefs.notification_channels = data.get("notification_channels", {})
-        prefs.digest_frequency = data.get("digest_frequency", "realtime")
-        prefs.default_view = data.get("default_view", "list")
+        serializer = UserPreferencesUpdateSerializer(prefs, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        for field, value in serializer.validated_data.items():
+            setattr(prefs, field, value)
         prefs.save()
         return Response(UserPreferencesSerializer(prefs).data)
 
@@ -347,18 +425,20 @@ def _set_refresh_cookie(response, raw_refresh: str) -> None:
         raw_refresh,
         max_age=REFRESH_TOKEN_DAYS * 86400,
         httponly=True,
-        secure=False,   # Set to True in production (requires HTTPS)
-        samesite="Lax", # Lax allows the cookie to be sent on top-level navigations (e.g., redirects)
+        secure=not settings.DEBUG,
+        samesite="Strict",
         path="/api/auth/",
     )
 
 
 def _get_client_ip(request):
-    """Returns the client IP address, respecting the X-Forwarded-For header."""
-    forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
-    if forwarded_for:
-        return forwarded_for.split(",")[0].strip()
-    return request.META.get("REMOTE_ADDR")
+    """Returns the client IP, trusting X-Forwarded-For only from TRUSTED_PROXIES."""
+    remote_addr = request.META.get("REMOTE_ADDR", "")
+    if remote_addr in settings.TRUSTED_PROXIES:
+        forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
+        if forwarded_for:
+            return forwarded_for.split(",")[0].strip()
+    return remote_addr
 
 
 # ---------------------------------------------------------------------------
@@ -367,9 +447,11 @@ def _get_client_ip(request):
 
 class NotificationListView(APIView):
     """
-    GET /api/notifications/  — list notifications for current user
+    GET /api/notifications/  — list notifications for current user, scoped to active workspace
     """
     def get(self, request):
+        from projects.models import Project
+        from projects.request_helpers import get_active_workspace
         from users.models import Notification
         from users.serializers import NotificationSerializer
         qs = (
@@ -378,13 +460,24 @@ class NotificationListView(APIView):
             .select_related("actor")
             .order_by("-created_at")
         )
+        # Strict active-workspace filter: only show notifications tied to this workspace's projects/tasks.
+        active_ws = get_active_workspace(request)
+        if active_ws:
+            ws_project_ids = Project.objects.filter(workspace=active_ws).values_list("id", flat=True)
+            qs = qs.filter(
+                models.Q(project_id__in=ws_project_ids)
+                | models.Q(project_id__isnull=True, task_id__isnull=True)
+            )
         is_read = request.query_params.get("is_read")
         if is_read is not None:
             qs = qs.filter(is_read=is_read.lower() == "true")
         ntype = request.query_params.get("type")
         if ntype:
             qs = qs.filter(type=ntype)
-        limit = min(int(request.query_params.get("limit", 50)), 100)
+        try:
+            limit = min(int(request.query_params.get("limit", 50)), 100)
+        except (ValueError, TypeError):
+            limit = 50
         serializer = NotificationSerializer(qs[:limit], many=True)
         return Response(serializer.data)
 
@@ -403,9 +496,9 @@ class NotificationDetailView(APIView):
         from users.serializers import NotificationSerializer
         n = self._get_notif(request, pk)
         is_read = request.data.get("is_read")
-        if is_read is True or is_read == "true":
-            n.is_read = True
-            n.read_at = tz.now()
+        if is_read is not None:
+            n.is_read = bool(is_read)
+            n.read_at = tz.now() if n.is_read else None
             n.save(update_fields=["is_read", "read_at"])
         return Response(NotificationSerializer(n).data)
 
@@ -437,6 +530,11 @@ class VerifyEmailView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
+        from users.throttling import VerifyEmailRateThrottle
+        throttle = VerifyEmailRateThrottle()
+        if not throttle.allow_request(request, self):
+            return Response({"detail": "Too many requests. Try again later."}, status=429)
+
         token = request.headers.get("X-Verification-Token", "").strip()
         if not token:
             return Response({"detail": "X-Verification-Token header is required."}, status=400)
@@ -452,6 +550,11 @@ class ResendVerificationView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        from users.throttling import ResendVerificationRateThrottle
+        throttle = ResendVerificationRateThrottle()
+        if not throttle.allow_request(request, self):
+            return Response({"detail": "Too many requests. Try again later."}, status=429)
+
         if request.user.email_verified:
             return Response({"detail": "Email is already verified."}, status=400)
         UserService.send_verification_email(request.user)
@@ -481,16 +584,21 @@ class ForgotPasswordView(APIView):
 
 
 class ResetPasswordView(APIView):
-    """POST /api/auth/reset-password   header: X-Reset-Token + X-New-Password"""
+    """POST /api/auth/reset-password   body: {token, new_password}"""
     authentication_classes = []
     permission_classes = [AllowAny]
 
     def post(self, request):
-        token = request.headers.get("X-Reset-Token", "").strip()
-        new_password = request.headers.get("X-New-Password", "").strip()
+        from users.throttling import ResetPasswordRateThrottle
+        throttle = ResetPasswordRateThrottle()
+        if not throttle.allow_request(request, self):
+            return Response({"detail": "Too many requests. Try again later."}, status=429)
+
+        token = request.data.get("token", "").strip()
+        new_password = request.data.get("new_password", "").strip()
         if not token or not new_password:
             return Response(
-                {"detail": "X-Reset-Token and X-New-Password headers are required."},
+                {"detail": "token and new_password are required."},
                 status=400,
             )
         if len(new_password) < 8:

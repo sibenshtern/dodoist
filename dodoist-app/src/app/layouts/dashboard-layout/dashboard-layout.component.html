@@ -8,14 +8,39 @@
       <span class="brand-name">Dodoist</span>
     </div>
 
-    <button class="workspace-switcher">
-      <div class="workspace-icon">{{ workspaceInitial() }}</div>
-      <div class="workspace-info">
-        <span class="workspace-name">{{ workspaceName() }}</span>
-        <span class="workspace-plan">{{ workspacePlan() }}</span>
-      </div>
-      <tui-icon icon="@tui.chevron-down" class="workspace-chevron" />
-    </button>
+    <div class="workspace-switcher-wrap">
+      <button class="workspace-switcher" (click)="wsDropdownOpen.update(v => !v)" [disabled]="isSwitching()">
+        <div class="workspace-icon">{{ isSwitching() ? '…' : workspaceInitial() }}</div>
+        <div class="workspace-info">
+          <span class="workspace-name">{{ workspaceName() }}</span>
+          <span class="workspace-plan">{{ workspacePlan() }}</span>
+        </div>
+        <tui-icon icon="@tui.chevron-down" class="workspace-chevron" [class.flipped]="wsDropdownOpen()" />
+      </button>
+      @if (wsDropdownOpen()) {
+        <div class="ws-dropdown">
+          @for (ws of workspaceList(); track ws.id) {
+            <button
+              class="ws-dropdown__item"
+              [class.ws-dropdown__item--active]="ws.id === userService.currentWorkspace()?.id"
+              [disabled]="isSwitching()"
+              (click)="switchWorkspace(ws)"
+            >
+              <span class="ws-dropdown__initial">{{ ws.name[0]?.toUpperCase() }}</span>
+              <span class="ws-dropdown__name">{{ ws.name }}</span>
+              @if (ws.id === userService.currentWorkspace()?.id) {
+                <tui-icon icon="@tui.check" class="ws-dropdown__check" />
+              }
+            </button>
+          }
+          <div class="ws-dropdown__divider"></div>
+          <a class="ws-dropdown__item ws-dropdown__manage" routerLink="/workspaces" (click)="wsDropdownOpen.set(false)">
+            <tui-icon icon="@tui.settings" />
+            Manage workspaces
+          </a>
+        </div>
+      }
+    </div>
 
     <button class="search-trigger" (click)="searchOpen.set(true)" title="Search tasks (⌘K)">
       <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
@@ -59,10 +84,16 @@
         </span>
         Notifications
       </button>
-      <button class="nav__item" [routerLink]="'/settings'">
+      <a class="nav__item" routerLink="/settings" routerLinkActive="nav__item--active">
         <tui-icon icon="@tui.settings" class="nav__icon" />
         Settings
-      </button>
+      </a>
+      @if (userService.currentWorkspace()) {
+        <a class="nav__item" [routerLink]="['/workspaces', userService.currentWorkspace()!.slug]" routerLinkActive="nav__item--active">
+          <tui-icon icon="@tui.building" class="nav__icon" />
+          Workspace settings
+        </a>
+      }
       <div class="user-row">
         <div class="user-avatar">{{ currentUserInitials() }}</div>
         <span class="user-name">{{ currentUserName() }}</span>

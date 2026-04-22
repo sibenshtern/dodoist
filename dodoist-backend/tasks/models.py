@@ -87,11 +87,17 @@ class Task(models.Model):
     class Meta:
         db_table = "tasks"
         indexes = [
+            # Single-column indexes for FK lookups
             models.Index(fields=["project"]),
             models.Index(fields=["assigned_to"]),
             models.Index(fields=["status"]),
             models.Index(fields=["due_date"]),
             models.Index(fields=["deleted_at"]),
+            # Composite indexes for common filter + order patterns
+            models.Index(fields=["project", "deleted_at"], name="task_project_deleted_idx"),
+            models.Index(fields=["assigned_to", "status"], name="task_assignee_status_idx"),
+            models.Index(fields=["due_date", "status", "deleted_at"], name="task_due_status_deleted_idx"),
+            models.Index(fields=["sprint", "status"], name="task_sprint_status_idx"),
         ]
 
     def __str__(self):
@@ -201,6 +207,9 @@ class Comment(models.Model):
 
     class Meta:
         db_table = "comments"
+        indexes = [
+            models.Index(fields=["task", "deleted_at"], name="comment_task_deleted_idx"),
+        ]
 
     def __str__(self):
         return f"Comment by {self.author_id} on {self.task_id}"
@@ -226,6 +235,7 @@ class ActivityLog(models.Model):
         db_table = "activity_log"
         indexes = [
             models.Index(fields=["entity_type", "entity_id"]),
+            models.Index(fields=["entity_id", "created_at"], name="activity_entity_time_idx"),
             models.Index(fields=["project"]),
             models.Index(fields=["actor"]),
             models.Index(fields=["created_at"]),
@@ -262,6 +272,10 @@ class TimeLog(models.Model):
 
     class Meta:
         db_table = "time_logs"
+        indexes = [
+            models.Index(fields=["task", "logged_date"], name="timelog_task_date_idx"),
+            models.Index(fields=["user", "logged_date"], name="timelog_user_date_idx"),
+        ]
 
     def __str__(self):
         return f"{self.logged_minutes}min by {self.user_id} on {self.logged_date}"

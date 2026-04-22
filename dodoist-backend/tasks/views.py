@@ -1,6 +1,6 @@
 from datetime import timedelta
 
-from django.db.models import Sum
+from django.db.models import Count, Q, Sum
 from django.shortcuts import get_object_or_404
 from django.utils import timezone as tz
 from rest_framework.response import Response
@@ -48,26 +48,38 @@ def _can_manage_guest_access(user, task):
 def _get_or_create_personal_project(user):
     """
     Returns the user's personal project, creating it if it doesn't exist.
-    Used when a task is created without specifying a project.
+    Uses select_for_update to guard against concurrent first-write races.
     """
+    from django.db import IntegrityError, transaction
     from projects.models import Workspace
-    personal_ws = Workspace.objects.filter(owner=user, is_personal=True).first()
-    if not personal_ws:
-        from projects.services import WorkspaceService
-        personal_ws = WorkspaceService.create_personal_workspace(user)
+    from projects.services import WorkspaceService
 
-    project, created = Project.objects.get_or_create(
-        workspace=personal_ws,
-        type=ProjectType.PERSONAL,
-        defaults={
-            "name": "Personal",
-            "key": "PERS",
-            "status": ProjectStatus.ACTIVE,
-            "created_by": user,
-        },
-    )
-    if created:
-        ProjectMember.objects.create(project=project, user=user, role=ProjectRole.PO)
+    with transaction.atomic():
+        personal_ws = (
+            Workspace.objects.select_for_update()
+            .filter(owner=user, is_personal=True)
+            .first()
+        )
+        if not personal_ws:
+            personal_ws = WorkspaceService.create_personal_workspace(user)
+
+        try:
+            project, created = Project.objects.get_or_create(
+                workspace=personal_ws,
+                type=ProjectType.PERSONAL,
+                defaults={
+                    "name": "Personal",
+                    "key": "PERS",
+                    "status": ProjectStatus.ACTIVE,
+                    "created_by": user,
+                },
+            )
+        except IntegrityError:
+            project = Project.objects.get(workspace=personal_ws, type=ProjectType.PERSONAL)
+            created = False
+
+        if created:
+            ProjectMember.objects.create(project=project, user=user, role=ProjectRole.PO)
 
     return project
 
@@ -518,8 +530,10 @@ class DashboardStatsView(APIView):
     """
 
     def get(self, request):
+        from projects.request_helpers import get_active_workspace
         user = request.user
         now = tz.now()
+        active_ws = get_active_workspace(request)
 
         open_statuses = [
             TaskStatus.BACKLOG,
@@ -528,44 +542,56 @@ class DashboardStatsView(APIView):
             TaskStatus.IN_REVIEW,
         ]
 
+        ws_filter = {"project__workspace": active_ws} if active_ws else {}
         base_qs = Task.objects.filter(
             assigned_to=user,
             deleted_at__isnull=True,
+            **ws_filter,
         )
 
-        open_tasks = base_qs.filter(status__in=open_statuses).count()
-
         yesterday = now - timedelta(days=1)
-        open_tasks_delta = base_qs.filter(
-            status__in=open_statuses,
-            created_at__gte=yesterday,
-        ).count()
-
         monday_this_week = _get_monday_of_week(now)
         monday_last_week = monday_this_week - timedelta(weeks=1)
 
-        done_this_week = base_qs.filter(
-            status=TaskStatus.DONE,
-            completed_at__gte=monday_this_week,
-        ).count()
+        # Collapse all counts into one DB round-trip using conditional aggregation
+        stats = base_qs.aggregate(
+            open_tasks=Count(
+                "id", filter=Q(status__in=open_statuses)
+            ),
+            open_tasks_delta=Count(
+                "id", filter=Q(status__in=open_statuses, created_at__gte=yesterday)
+            ),
+            done_this_week=Count(
+                "id", filter=Q(status=TaskStatus.DONE, completed_at__gte=monday_this_week)
+            ),
+            done_last_week=Count(
+                "id",
+                filter=Q(
+                    status=TaskStatus.DONE,
+                    completed_at__gte=monday_last_week,
+                    completed_at__lt=monday_this_week,
+                ),
+            ),
+            overdue=Count(
+                "id", filter=Q(status__in=open_statuses, due_date__lt=now)
+            ),
+        )
 
-        done_last_week = base_qs.filter(
-            status=TaskStatus.DONE,
-            completed_at__gte=monday_last_week,
-            completed_at__lt=monday_this_week,
-        ).count()
+        open_tasks = stats["open_tasks"]
+        open_tasks_delta = stats["open_tasks_delta"]
+        done_this_week = stats["done_this_week"]
+        done_last_week = stats["done_last_week"]
+        overdue = stats["overdue"]
 
         if done_last_week > 0:
             done_this_week_delta_pct = round((done_this_week / done_last_week - 1) * 100)
         else:
             done_this_week_delta_pct = 0
 
-        overdue = base_qs.filter(
-            status__in=open_statuses,
-            due_date__lt=now,
-        ).count()
-
-        user_project_ids = ProjectMember.objects.filter(user=user).values_list("project_id", flat=True)
+        user_project_qs = ProjectMember.objects.filter(user=user)
+        if active_ws:
+            user_project_qs = user_project_qs.filter(project__workspace=active_ws)
+        user_project_ids = user_project_qs.values_list("project_id", flat=True)
         active_sprint = (
             Sprint.objects.filter(
                 project_id__in=user_project_ids,
@@ -653,12 +679,21 @@ class TaskCommentListView(APIView):
 
 class CommentDetailView(APIView):
     """
+    GET    /api/comments/<pk>/  — fetch a single comment
     PATCH  /api/comments/<pk>/  — edit comment (author or SA)
     DELETE /api/comments/<pk>/  — soft-delete (author, PM, PO, or SA)
     """
 
     def _get_comment(self, pk):
         return get_object_or_404(Comment, pk=pk, deleted_at__isnull=True)
+
+    def get(self, request, pk):
+        from .serializers import CommentSerializer
+        comment = self._get_comment(pk)
+        if not AccessControlService.can_view_task(request.user, comment.task):
+            return Response({"detail": "Not found."}, status=404)
+        comment = Comment.objects.select_related("author").prefetch_related("reactions").get(pk=pk)
+        return Response(CommentSerializer(comment).data)
 
     def patch(self, request, pk):
         comment = self._get_comment(pk)
@@ -932,7 +967,7 @@ class TaskRestoreView(APIView):
 
     def post(self, request, pk):
         task = get_object_or_404(Task, pk=pk)
-        if not AccessControlService.can_edit_task(request.user, task):
+        if not AccessControlService.can_restore_task(request.user, task):
             return Response({"detail": "Permission denied."}, status=403)
         try:
             task = TaskService.restore(task, request.user)
@@ -963,7 +998,7 @@ class TaskTimeLogListView(APIView):
         until = request.query_params.get("until")
         if until:
             qs = qs.filter(logged_date__lte=until)
-        total_minutes = sum(t.logged_minutes for t in qs)
+        total_minutes = qs.aggregate(total=Sum("logged_minutes"))["total"] or 0
         return Response({"data": TimeLogSerializer(qs, many=True).data, "meta": {"total_minutes": total_minutes}})
 
     def post(self, request, pk):
@@ -1039,18 +1074,24 @@ class TodayTasksView(APIView):
 
     Returns tasks assigned to the authenticated user due within ±3 days,
     including overdue. Cancelled and deleted tasks are excluded.
+    Scoped to the user's active workspace.
     """
 
     def get(self, request):
+        from projects.request_helpers import get_active_workspace
+        active_ws = get_active_workspace(request)
         now = tz.now()
         window_start = now - timedelta(days=2)
         window_end = now + timedelta(days=3)
+
+        ws_filter = {"project__workspace": active_ws} if active_ws else {}
 
         tasks = (
             Task.objects.filter(
                 assigned_to=request.user,
                 deleted_at__isnull=True,
                 due_date__range=(window_start, window_end),
+                **ws_filter,
             )
             .exclude(status=TaskStatus.CANCELLED)
             .prefetch_related("task_labels__label")
@@ -1128,7 +1169,7 @@ class UserActivityView(APIView):
 
 class MyTasksView(APIView):
     """
-    GET /api/tasks/my/ — tasks assigned to the current user across all projects.
+    GET /api/tasks/my/ — tasks assigned to the current user in the active workspace.
     Excludes cancelled and deleted tasks.
 
     Query params:
@@ -1136,8 +1177,11 @@ class MyTasksView(APIView):
     """
 
     def get(self, request):
+        from projects.request_helpers import get_active_workspace
+        active_ws = get_active_workspace(request)
+        ws_filter = {"project__workspace": active_ws} if active_ws else {}
         qs = (
-            Task.objects.filter(assigned_to=request.user, deleted_at__isnull=True)
+            Task.objects.filter(assigned_to=request.user, deleted_at__isnull=True, **ws_filter)
             .exclude(status="cancelled")
             .select_related("project", "assigned_to", "created_by", "sprint", "board_column")
             .prefetch_related("task_labels__label")
@@ -1217,6 +1261,35 @@ class AttachmentDetailView(APIView):
         return Response(status=204)
 
 
+class AttachmentDownloadView(APIView):
+    """
+    GET /api/attachments/<pk>/download/
+
+    Streams the attachment file after verifying the caller has task-view access.
+    This endpoint is the only authorized download path — direct media URLs are
+    not exposed in the API (see AttachmentSerializer.get_download_url).
+    """
+
+    def get(self, request, pk):
+        from .models import Attachment
+        attachment = get_object_or_404(Attachment, pk=pk)
+        if attachment.task and not AccessControlService.can_view_task(request.user, attachment.task):
+            return Response({"detail": "Not found."}, status=404)
+
+        from django.core.files.storage import default_storage
+        from django.http import StreamingHttpResponse
+
+        if not default_storage.exists(attachment.storage_key):
+            return Response({"detail": "File not found in storage."}, status=404)
+
+        file_obj = default_storage.open(attachment.storage_key, "rb")
+        response = StreamingHttpResponse(file_obj, content_type=attachment.mime_type)
+        safe_filename = attachment.filename.replace('"', '\\"')
+        response["Content-Disposition"] = f'attachment; filename="{safe_filename}"'
+        response["Content-Length"] = attachment.file_size_bytes
+        return response
+
+
 class TaskSearchView(APIView):
     """
     GET /api/tasks/search/?q=<query>
@@ -1225,38 +1298,38 @@ class TaskSearchView(APIView):
     """
 
     def get(self, request):
+        from projects.request_helpers import get_active_workspace
         q = request.query_params.get("q", "").strip()
         if len(q) < 2:
             return Response([])
 
-        # Determine which projects the caller can see
+        active_ws = get_active_workspace(request)
+
+        # Determine which projects the caller can see within the active workspace
         if request.user.has_elevated_access():
-            accessible_pids = Project.objects.filter(
-                status=ProjectStatus.ACTIVE
-            ).values_list("id", flat=True)
+            project_qs = Project.objects.filter(status=ProjectStatus.ACTIVE)
         else:
-            accessible_pids = ProjectMember.objects.filter(
-                user=request.user
-            ).values_list("project_id", flat=True)
-
-        tasks = (
-            Task.objects.filter(
-                project_id__in=accessible_pids,
-                deleted_at__isnull=True,
-                title__icontains=q,
+            project_qs = Project.objects.filter(
+                members__user=request.user,
+                status=ProjectStatus.ACTIVE,
             )
-            .select_related("project", "assigned_to")
-            .order_by("-updated_at")[:20]
-        )
+        if active_ws:
+            project_qs = project_qs.filter(workspace=active_ws)
+        accessible_pids = project_qs.values_list("id", flat=True)
 
-        # Guests only see public tasks in their accessible projects
+        qs = Task.objects.filter(
+            project_id__in=accessible_pids,
+            deleted_at__isnull=True,
+            title__icontains=q,
+        ).select_related("project", "assigned_to")
+
+        # Guests only see public tasks in their accessible projects — filter in DB
         if not request.user.has_elevated_access():
             guest_project_ids = ProjectMember.objects.filter(
                 user=request.user, role=ProjectRole.GU
             ).values_list("project_id", flat=True)
-            tasks = [
-                t for t in tasks
-                if not (t.project_id in guest_project_ids and t.is_private)
-            ]
+            qs = qs.exclude(project_id__in=guest_project_ids, is_private=True)
+
+        tasks = qs.order_by("-updated_at")[:20]
 
         return Response(TaskSearchResultSerializer(tasks, many=True).data)

@@ -24,7 +24,15 @@ class User(AbstractBaseUser):
     )
     is_active = models.BooleanField(default=True)
     email_verified = models.BooleanField(default=False)
+    active_workspace = models.ForeignKey(
+        "projects.Workspace",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="active_for_users",
+    )
     verification_token_hash = models.CharField(max_length=255, blank=True, default="")
+    verification_token_expires_at = models.DateTimeField(null=True, blank=True)
     password_reset_token_hash = models.CharField(max_length=255, blank=True, default="")
     password_reset_expires_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(default=tz.now)
@@ -50,11 +58,14 @@ class UserSession(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="sessions")
     # Short-lived access token (15 minutes)
-    token_hash = models.CharField(max_length=255)
+    token_hash = models.CharField(max_length=255, db_index=True)
     expires_at = models.DateTimeField()
     # Long-lived refresh token (7 days), sent as HttpOnly cookie
     refresh_token_hash = models.CharField(max_length=255, unique=True)
     refresh_expires_at = models.DateTimeField()
+    # Stores the previously-used refresh hash so that replaying a rotated token
+    # is detected and triggers full session revocation (reuse-detection).
+    previous_refresh_token_hash = models.CharField(max_length=255, blank=True, default="")
     device_info = models.CharField(max_length=512, blank=True, default="")
     ip_address = models.GenericIPAddressField(null=True, blank=True)
     created_at = models.DateTimeField(default=tz.now)
@@ -141,6 +152,7 @@ class Notification(models.Model):
         indexes = [
             models.Index(fields=["recipient", "is_read"]),
             models.Index(fields=["created_at"]),
+            models.Index(fields=["recipient", "created_at"], name="notif_recipient_time_idx"),
         ]
 
     def __str__(self):

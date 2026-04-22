@@ -1241,9 +1241,7 @@ class TestTaskDetailView:
 
 @pytest.mark.django_db
 class TestTaskRestoreView:
-    def test_restore_soft_deleted_task(self, task, user, db):
-        # Only elevated users can restore deleted tasks (can_edit_task returns
-        # False for deleted tasks for regular project members).
+    def test_restore_soft_deleted_task_sa(self, task, user, db):
         elevated = User.objects.create_user(
             email="sa@example.com", password="p", display_name="SA",
             global_role=GlobalRole.SA,
@@ -1256,10 +1254,21 @@ class TestTaskRestoreView:
         task.refresh_from_db()
         assert task.deleted_at is None
 
-    def test_regular_member_cannot_restore_deleted_task(self, task, user):
+    def test_restore_soft_deleted_task_po(self, task, user, project):
+        # PO may restore deleted tasks (can_restore_task allows PO/PM).
         TaskService.soft_delete(task, actor=user)
         c = APIClient()
         c.force_authenticate(user=user)
+        resp = c.post(f"/api/tasks/{task.pk}/restore/")
+        assert resp.status_code == 200
+        task.refresh_from_db()
+        assert task.deleted_at is None
+
+    def test_dev_member_cannot_restore_deleted_task(self, task, user, other_user, project):
+        ProjectMember.objects.create(project=project, user=other_user, role=ProjectRole.DEV)
+        TaskService.soft_delete(task, actor=user)
+        c = APIClient()
+        c.force_authenticate(user=other_user)
         resp = c.post(f"/api/tasks/{task.pk}/restore/")
         assert resp.status_code == 403
 
@@ -1510,3 +1519,221 @@ class TestMyTasksView:
         resp = c.get("/api/tasks/my/")
         ids = [item["id"] for item in resp.json()]
         assert str(t.pk) not in ids
+
+
+# ---------------------------------------------------------------------------
+# Dependency cycle detection
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+class TestDependencyCycleDetection:
+    def test_self_dependency_raises(self, task, user):
+        with pytest.raises(ValueError, match="itself"):
+            TaskService.add_dependency(task, task, DependencyType.BLOCKS, user)
+
+    def test_direct_cycle_raises(self, project, user):
+        a = TaskService.create_task(project=project, creator=user, title="A")
+        b = TaskService.create_task(project=project, creator=user, title="B")
+        TaskService.add_dependency(a, b, DependencyType.BLOCKS, user)
+        with pytest.raises(ValueError, match="CYCLIC_DEPENDENCY"):
+            TaskService.add_dependency(b, a, DependencyType.BLOCKS, user)
+
+    def test_transitive_cycle_raises(self, project, user):
+        a = TaskService.create_task(project=project, creator=user, title="A")
+        b = TaskService.create_task(project=project, creator=user, title="B")
+        c = TaskService.create_task(project=project, creator=user, title="C")
+        TaskService.add_dependency(a, b, DependencyType.BLOCKS, user)
+        TaskService.add_dependency(b, c, DependencyType.BLOCKS, user)
+        with pytest.raises(ValueError, match="CYCLIC_DEPENDENCY"):
+            TaskService.add_dependency(c, a, DependencyType.BLOCKS, user)
+
+    def test_non_cycle_succeeds(self, project, user):
+        a = TaskService.create_task(project=project, creator=user, title="A")
+        b = TaskService.create_task(project=project, creator=user, title="B")
+        c = TaskService.create_task(project=project, creator=user, title="C")
+        TaskService.add_dependency(a, b, DependencyType.BLOCKS, user)
+        dep = TaskService.add_dependency(a, c, DependencyType.RELATES_TO, user)
+        assert dep.pk is not None
+
+
+# ---------------------------------------------------------------------------
+# WIP limit enforcement
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+class TestWipLimitEnforcement:
+    def test_wip_limit_blocks_extra_task(self, project, user):
+        from projects.models import Board, BoardColumn, TaskStatus
+        board = Board.objects.filter(project=project, is_default=True).first()
+        col = board.columns.filter(status_mapping=TaskStatus.IN_PROGRESS).first()
+        col.wip_limit = 2
+        col.save()
+        t1 = TaskService.create_task(project=project, creator=user, title="T1")
+        t2 = TaskService.create_task(project=project, creator=user, title="T2")
+        t3 = TaskService.create_task(project=project, creator=user, title="T3")
+        TaskService.move_to_column(t1, col, user)
+        TaskService.move_to_column(t2, col, user)
+        with pytest.raises(ValueError, match="WIP limit"):
+            TaskService.move_to_column(t3, col, user)
+
+    def test_wip_limit_allows_moving_existing_task(self, project, user):
+        from projects.models import Board, BoardColumn, TaskStatus
+        board = Board.objects.filter(project=project, is_default=True).first()
+        col = board.columns.filter(status_mapping=TaskStatus.IN_PROGRESS).first()
+        col.wip_limit = 1
+        col.save()
+        t = TaskService.create_task(project=project, creator=user, title="T")
+        TaskService.move_to_column(t, col, user)
+        # Moving the same task again should not exceed the limit
+        TaskService.move_to_column(t, col, user)
+        assert t.board_column_id == col.pk
+
+
+# ---------------------------------------------------------------------------
+# can_restore_task permission
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+class TestCanRestoreTask:
+    def test_po_can_restore(self, task, user):
+        TaskService.soft_delete(task, actor=user)
+        assert AccessControlService.can_restore_task(user, task) is True
+
+    def test_dev_cannot_restore(self, task, user, other_user, project):
+        ProjectMember.objects.create(project=project, user=other_user, role=ProjectRole.DEV)
+        TaskService.soft_delete(task, actor=user)
+        assert AccessControlService.can_restore_task(other_user, task) is False
+
+    def test_non_deleted_task_returns_false(self, task, user):
+        assert AccessControlService.can_restore_task(user, task) is False
+
+
+# ---------------------------------------------------------------------------
+# SSE token endpoint
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+class TestSSETokenView:
+    def test_authenticated_user_gets_token(self, user):
+        c = APIClient()
+        c.force_authenticate(user=user)
+        resp = c.post("/api/auth/sse-token/")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "token" in data
+        assert len(data["token"]) == 64  # 32 bytes hex
+
+    def test_unauthenticated_gets_401(self):
+        c = APIClient()
+        resp = c.post("/api/auth/sse-token/")
+        assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Active-workspace filter — MyTasks, Today, Search, Dashboard
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+class TestActiveWorkspaceFilter:
+    @pytest.fixture
+    def owner(self, db):
+        return UserService.register(email="wf_owner@example.com", password="p", display_name="WFOwner")
+
+    @pytest.fixture
+    def personal_ws(self, owner):
+        from projects.services import WorkspaceService
+        return WorkspaceService.create_personal_workspace(owner)
+
+    @pytest.fixture
+    def team_ws(self, owner):
+        from projects.services import WorkspaceService
+        return WorkspaceService.create_team_workspace(owner=owner, name="TeamWF", slug="team-wf")
+
+    @pytest.fixture
+    def personal_project(self, personal_ws, owner):
+        return ProjectService.create_project(workspace=personal_ws, creator=owner, name="PersonalP", key="PP")
+
+    @pytest.fixture
+    def team_project(self, team_ws, owner):
+        return ProjectService.create_project(workspace=team_ws, creator=owner, name="TeamP", key="TP")
+
+    @pytest.fixture
+    def personal_task(self, personal_project, owner):
+        return TaskService.create_task(project=personal_project, creator=owner, title="Personal task")
+
+    @pytest.fixture
+    def team_task(self, team_project, owner):
+        return TaskService.create_task(project=team_project, creator=owner, title="Team task")
+
+    def _set_active(self, owner, ws):
+        owner.active_workspace = ws
+        owner.save(update_fields=["active_workspace"])
+
+    def test_my_tasks_scoped_to_active_workspace(self, owner, personal_ws, team_ws,
+                                                  personal_project, team_project,
+                                                  personal_task, team_task):
+        # Assign owner to both tasks so they appear in "my tasks"
+        personal_task.assigned_to = owner
+        personal_task.save()
+        team_task.assigned_to = owner
+        team_task.save()
+
+        # Active = personal workspace → only personal task appears
+        self._set_active(owner, personal_ws)
+        c = APIClient()
+        c.force_authenticate(user=owner)
+        resp = c.get("/api/tasks/my/")
+        assert resp.status_code == 200
+        ids = [t["id"] for t in resp.json()]
+        assert str(personal_task.pk) in ids
+        assert str(team_task.pk) not in ids
+
+    def test_my_tasks_switches_when_workspace_changes(self, owner, personal_ws, team_ws,
+                                                       personal_project, team_project,
+                                                       personal_task, team_task):
+        team_task.assigned_to = owner
+        team_task.save()
+        personal_task.assigned_to = owner
+        personal_task.save()
+
+        # Switch to team workspace
+        self._set_active(owner, team_ws)
+        c = APIClient()
+        c.force_authenticate(user=owner)
+        resp = c.get("/api/tasks/my/")
+        ids = [t["id"] for t in resp.json()]
+        assert str(team_task.pk) in ids
+        assert str(personal_task.pk) not in ids
+
+    def test_search_scoped_to_active_workspace(self, owner, personal_ws, team_ws,
+                                                personal_project, team_project,
+                                                personal_task, team_task):
+        self._set_active(owner, personal_ws)
+        c = APIClient()
+        c.force_authenticate(user=owner)
+        resp = c.get("/api/tasks/search/?q=task")
+        assert resp.status_code == 200
+        ids = [t["id"] for t in resp.json()]
+        assert str(personal_task.pk) in ids
+        assert str(team_task.pk) not in ids
+
+    def test_today_scoped_to_active_workspace(self, owner, personal_ws, team_ws,
+                                               personal_project, team_project,
+                                               personal_task, team_task):
+        from django.utils import timezone as tz
+        today = tz.now().date()
+        personal_task.due_date = today
+        personal_task.assigned_to = owner
+        personal_task.save()
+        team_task.due_date = today
+        team_task.assigned_to = owner
+        team_task.save()
+
+        self._set_active(owner, personal_ws)
+        c = APIClient()
+        c.force_authenticate(user=owner)
+        resp = c.get("/api/tasks/today/")
+        assert resp.status_code == 200
+        ids = [t["id"] for t in resp.json()]
+        assert str(personal_task.pk) in ids
+        assert str(team_task.pk) not in ids

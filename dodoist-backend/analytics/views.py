@@ -19,11 +19,19 @@ def _can_view_project(user, project):
 
 
 def _can_view_analytics(user, project):
-    """PM/PO or elevated access required for member metrics."""
+    """PO/PM or elevated access required for per-member metrics."""
     if user.has_elevated_access():
         return True
     membership = ProjectMember.objects.filter(project=project, user=user).first()
     return membership and membership.role in (ProjectRole.PO, ProjectRole.PM)
+
+
+def _can_view_summary(user, project):
+    """PO/PM/DEV or elevated access required for project summary analytics."""
+    if user.has_elevated_access():
+        return True
+    membership = ProjectMember.objects.filter(project=project, user=user).first()
+    return membership and membership.role in (ProjectRole.PO, ProjectRole.PM, ProjectRole.DEV)
 
 
 def _velocity(project):
@@ -80,7 +88,7 @@ class ProjectMetricsSummaryView(APIView):
 
     def get(self, request, pk):
         project = get_object_or_404(Project, pk=pk)
-        if not _can_view_project(request.user, project):
+        if not _can_view_summary(request.user, project):
             return Response({"detail": "Not found."}, status=404)
 
         now = timezone.now()

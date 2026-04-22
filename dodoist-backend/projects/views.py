@@ -20,6 +20,7 @@ from .models import (
     SprintStatus,
     Workspace,
     WorkspaceMember,
+    WorkspaceRole,
 )
 from .serializers import (
     BoardColumnCreateSerializer,
@@ -42,7 +43,9 @@ from .serializers import (
     SprintSerializer,
     SprintUpdateSerializer,
     WorkspaceCreateSerializer,
+    WorkspaceMemberAddSerializer,
     WorkspaceMemberSerializer,
+    WorkspaceMemberUpdateSerializer,
     WorkspaceSerializer,
     WorkspaceUpdateSerializer,
 )
@@ -107,16 +110,13 @@ def _project_qs_with_prefetch():
 # ---------------------------------------------------------------------------
 
 class WorkspaceListCreateView(APIView):
-    """
-    GET  /api/workspaces/  — list current user's workspaces
-    POST /api/workspaces/  — create a workspace
-    """
-
     def get(self, request):
         if request.user.has_elevated_access():
             qs = Workspace.objects.all().select_related("owner")
         else:
-            qs = Workspace.objects.filter(members__user=request.user).select_related("owner")
+            qs = Workspace.objects.filter(
+                members__user=request.user, deleted_at__isnull=True
+            ).select_related("owner")
 
         is_personal = request.query_params.get("is_personal")
         if is_personal is not None:
@@ -129,12 +129,11 @@ class WorkspaceListCreateView(APIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
         try:
-            workspace = WorkspaceService.create_workspace(
+            workspace = WorkspaceService.create_team_workspace(
                 owner=request.user,
                 name=data["name"],
                 slug=data["slug"] or None,
                 description=data["description"],
-                plan=data["plan"],
             )
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=400)
@@ -142,12 +141,6 @@ class WorkspaceListCreateView(APIView):
 
 
 class WorkspaceDetailView(APIView):
-    """
-    GET    /api/workspaces/<slug>/  — retrieve workspace details
-    PATCH  /api/workspaces/<slug>/  — update metadata (owner or SA)
-    DELETE /api/workspaces/<slug>/  — delete workspace (SA only)
-    """
-
     def get(self, request, slug):
         workspace = _get_workspace(slug)
         if not request.user.has_elevated_access() and not _is_workspace_member(workspace, request.user):
@@ -156,10 +149,9 @@ class WorkspaceDetailView(APIView):
 
     def patch(self, request, slug):
         workspace = _get_workspace(slug)
-        if not request.user.has_elevated_access() and workspace.owner_id != request.user.pk:
-            return Response(
-                {"detail": "Only the workspace owner can update this workspace."}, status=403
-            )
+        from tasks.services import AccessControlService
+        if not request.user.has_elevated_access() and not AccessControlService.is_workspace_admin_or_owner(request.user, workspace):
+            return Response({"detail": "Only Owner or Admin can update workspace settings."}, status=403)
         serializer = WorkspaceUpdateSerializer(workspace, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         workspace = serializer.save()
@@ -167,20 +159,51 @@ class WorkspaceDetailView(APIView):
 
     def delete(self, request, slug):
         workspace = _get_workspace(slug)
-        if not request.user.has_elevated_access():
-            return Response(
-                {"detail": "Only system administrators can delete workspaces."}, status=403
-            )
-        workspace.delete()
+        try:
+            WorkspaceService.soft_delete(workspace, request.user)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=400)
+        return Response(WorkspaceSerializer(workspace).data, status=200)
+
+
+class WorkspaceRestoreView(APIView):
+    def post(self, request, slug):
+        workspace = get_object_or_404(Workspace, slug=slug)
+        try:
+            WorkspaceService.restore(workspace, request.user)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=400)
+        return Response(WorkspaceSerializer(workspace).data)
+
+
+class WorkspaceTransferOwnershipView(APIView):
+    def post(self, request, slug):
+        workspace = _get_workspace(slug)
+        new_owner_id = request.data.get("new_owner_id")
+        if not new_owner_id:
+            return Response({"detail": "new_owner_id is required."}, status=400)
+        try:
+            new_owner = User.objects.get(pk=new_owner_id, is_active=True)
+        except (User.DoesNotExist, ValueError):
+            return Response({"detail": "User not found."}, status=404)
+        try:
+            WorkspaceService.transfer_ownership(workspace, new_owner, request.user)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=400)
+        return Response(WorkspaceSerializer(workspace).data)
+
+
+class WorkspaceLeaveView(APIView):
+    def post(self, request, slug):
+        workspace = _get_workspace(slug)
+        try:
+            WorkspaceService.leave(workspace, request.user)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=400)
         return Response(status=204)
 
 
 class WorkspaceMemberListView(APIView):
-    """
-    GET  /api/workspaces/<slug>/members/  — list workspace members
-    POST /api/workspaces/<slug>/members/  — add a member
-    """
-
     def get(self, request, slug):
         workspace = _get_workspace(slug)
         if not request.user.has_elevated_access() and not _is_workspace_member(workspace, request.user):
@@ -190,33 +213,47 @@ class WorkspaceMemberListView(APIView):
 
     def post(self, request, slug):
         workspace = _get_workspace(slug)
-        if not request.user.has_elevated_access() and workspace.owner_id != request.user.pk:
-            return Response(
-                {"detail": "Only the workspace owner can add members."}, status=403
-            )
-        user_id = request.data.get("user_id")
-        if not user_id:
-            return Response({"detail": "user_id is required."}, status=400)
+        from tasks.services import AccessControlService
+        if not request.user.has_elevated_access() and not AccessControlService.is_workspace_admin_or_owner(request.user, workspace):
+            return Response({"detail": "Only Owner or Admin can add members."}, status=403)
+        serializer = WorkspaceMemberAddSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
         try:
-            user = User.objects.get(pk=user_id, is_active=True)
+            user = User.objects.get(pk=data["user_id"], is_active=True)
         except (User.DoesNotExist, ValueError):
             return Response({"detail": "User not found."}, status=404)
-        member = WorkspaceService.add_member(workspace, user)
+        try:
+            member = WorkspaceService.add_member(workspace, user, role=data["role"], invited_by=request.user)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=400)
         member_with_user = WorkspaceMember.objects.select_related("user").get(pk=member.pk)
         return Response(WorkspaceMemberSerializer(member_with_user).data, status=201)
 
 
 class WorkspaceMemberDetailView(APIView):
-    """
-    DELETE /api/workspaces/<slug>/members/<user_id>/  — remove a member
-    """
+    def patch(self, request, slug, user_id):
+        workspace = _get_workspace(slug)
+        from tasks.services import AccessControlService
+        if not request.user.has_elevated_access() and not AccessControlService.is_workspace_admin_or_owner(request.user, workspace):
+            return Response({"detail": "Only Owner or Admin can change member roles."}, status=403)
+        serializer = WorkspaceMemberUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            user = User.objects.get(pk=user_id)
+        except (User.DoesNotExist, ValueError):
+            return Response({"detail": "User not found."}, status=404)
+        try:
+            member = WorkspaceService.change_role(workspace, user, serializer.validated_data["role"], request.user)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=400)
+        return Response(WorkspaceMemberSerializer(WorkspaceMember.objects.select_related("user").get(pk=member.pk)).data)
 
     def delete(self, request, slug, user_id):
         workspace = _get_workspace(slug)
-        if not request.user.has_elevated_access() and workspace.owner_id != request.user.pk:
-            return Response(
-                {"detail": "Only the workspace owner can remove members."}, status=403
-            )
+        from tasks.services import AccessControlService
+        if not request.user.has_elevated_access() and not AccessControlService.is_workspace_admin_or_owner(request.user, workspace):
+            return Response({"detail": "Only Owner or Admin can remove members."}, status=403)
         try:
             user = User.objects.get(pk=user_id)
         except (User.DoesNotExist, ValueError):

@@ -1,0 +1,18 @@
+Now for real email delivery — the current EMAIL_BACKEND is console.EmailBackend which only prints to the terminal. To receive actual emails,
+   configure Gmail SMTP. Add these to a .env file or export them before starting the server:
+
+  export EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
+  export EMAIL_HOST=smtp.gmail.com
+  export EMAIL_PORT=587
+  export EMAIL_USE_TLS=true
+  export EMAIL_HOST_USER=medamd2048@gmail.com
+  export EMAIL_HOST_PASSWORD=<your-gmail-app-password>
+  export DEFAULT_FROM_EMAIL="Dodoist <medamd2048@gmail.com>"
+
+  For EMAIL_HOST_PASSWORD, you need a Gmail App Password (not your regular password): go to myaccount.google.com/apppasswords, generate one
+  for "Mail", and use that 16-character code.
+
+  To test right now without SMTP — restart the backend and register a new account. The verification link will appear in the backend terminal
+  (Django console output). Copy that URL and open it in the browser.
+
+  Restart the backend server to pick up the CORS fix, then try verifying again.
