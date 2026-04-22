@@ -1,7 +1,7 @@
 import { Component, computed, inject, OnInit, signal } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { FormBuilder, FormsModule, ReactiveFormsModule, Validators } from '@angular/forms';
-import { DatePipe } from '@angular/common';
+import { DatePipe, TitleCasePipe } from '@angular/common';
 import { TuiIcon } from '@taiga-ui/core';
 import { WorkspaceService, WorkspaceMember, WorkspaceInvitation } from '../../services/workspace.service';
 import { UserService } from '../../services/user.service';
@@ -12,7 +12,7 @@ type Tab = 'members' | 'invites' | 'link';
 @Component({
   selector: 'app-workspace-members',
   standalone: true,
-  imports: [RouterLink, ReactiveFormsModule, FormsModule, DatePipe, TuiIcon],
+  imports: [RouterLink, ReactiveFormsModule, FormsModule, DatePipe, TitleCasePipe, TuiIcon],
   template: `
     <div class="page">
       <header class="page-header">

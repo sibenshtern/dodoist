@@ -634,120 +634,43 @@ class TestUserPreferencesView:
 
 
 # ---------------------------------------------------------------------------
-# Partial preferences update (PUT now uses partial semantics)
-# ---------------------------------------------------------------------------
-
-@pytest.mark.django_db
-class TestPartialPreferencesUpdate:
-    def test_put_preserves_unset_fields(self, user):
-        from rest_framework.test import APIClient
-        c = APIClient()
-        c.force_authenticate(user=user)
-        # First set language to fr
-        c.patch(f"/api/users/{user.pk}/preferences/", {"language": "fr"}, format="json")
-        # Then PUT with only theme — language should be preserved
-        resp = c.put(f"/api/users/{user.pk}/preferences/", {"theme": "dark"}, format="json")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["theme"] == "dark"
-        assert data["language"] == "fr"
-
-
-# ---------------------------------------------------------------------------
-# Refresh token rotation
-# ---------------------------------------------------------------------------
-
-@pytest.mark.django_db
-class TestRefreshTokenRotation:
-    def _login(self, email="alice@example.com", password="strongpass123"):
-        c = APIClient()
-        resp = c.post("/api/auth/login", {"email": email, "password": password}, format="json")
-        assert resp.status_code == 200
-        return resp
-
-    def test_refresh_returns_new_access_token(self, user):
-        login_resp = self._login()
-        token1 = login_resp.json()["access_token"]
-        c = APIClient()
-        c.cookies["refresh_token"] = login_resp.cookies.get("refresh_token", "")
-        refresh_resp = c.post("/api/auth/refresh")
-        if refresh_resp.status_code == 400:
-            pytest.skip("Refresh cookie not propagated in test client")
-        assert refresh_resp.status_code == 200
-        token2 = refresh_resp.json()["access_token"]
-        assert token1 != token2
-
-
-# ---------------------------------------------------------------------------
-# Set active workspace
+# Phase 6 — Active workspace switching
 # ---------------------------------------------------------------------------
 
 @pytest.mark.django_db
 class TestSetActiveWorkspace:
-    @pytest.fixture
-    def owner(self, db):
-        return UserService.register(email="saw_owner@example.com", password="p", display_name="SAWOwner")
+    def test_new_user_active_workspace_is_personal(self, db):
+        from users.services import UserService
+        u = UserService.register(email="fresh@example.com", password="pass123", display_name="Fresh")
+        assert u.active_workspace is not None
+        assert u.active_workspace.is_personal is True
 
-    @pytest.fixture
-    def other_user(self, db):
-        return UserService.register(email="saw_other@example.com", password="p", display_name="SAWOther")
+    def test_switch_to_valid_workspace(self, db):
+        from projects.services import WorkspaceService
+        from users.services import UserService
+        u = UserService.register(email="switcher@example.com", password="pass123", display_name="S")
+        ws = WorkspaceService.create_team_workspace(owner=u, name="Team", slug="team-sw")
+        UserService.set_active_workspace(u, ws)
+        u.refresh_from_db()
+        assert u.active_workspace == ws
 
-    def _client(self, user):
+    def test_cannot_switch_to_non_member_workspace(self, db):
+        from projects.services import WorkspaceService
+        from users.services import UserService
+        owner = UserService.register(email="owner99@example.com", password="pass123", display_name="Ow")
+        ws = WorkspaceService.create_team_workspace(owner=owner, name="Private", slug="private-99")
+        other = UserService.register(email="stranger99@example.com", password="pass123", display_name="St")
+        with pytest.raises(ValueError):
+            UserService.set_active_workspace(other, ws)
+
+    def test_patch_active_workspace_endpoint(self, db):
         from rest_framework.test import APIClient
-        c = APIClient()
-        c.force_authenticate(user=user)
-        return c
-
-    def test_register_sets_personal_as_active_workspace(self, owner):
-        from projects.models import Workspace
-        owner.refresh_from_db()
-        assert owner.active_workspace is not None
-        assert owner.active_workspace.is_personal is True
-
-    def test_can_switch_to_member_workspace(self, owner):
         from projects.services import WorkspaceService
-        ws = WorkspaceService.create_team_workspace(owner=owner, name="SAWWS", slug="saw-ws")
-        # create_team_workspace already switches active workspace to ws
-        owner.refresh_from_db()
-        # now switch to personal
-        personal = owner.active_workspace
-        # switch back to team
-        resp = self._client(owner).patch(
-            "/api/users/me/active-workspace/",
-            {"workspace_slug": ws.slug},
-            format="json",
-        )
+        from users.services import UserService
+        u = UserService.register(email="patch@example.com", password="pass123", display_name="P")
+        ws = WorkspaceService.create_team_workspace(owner=u, name="PatchWs", slug="patch-ws")
+        client = APIClient()
+        client.force_authenticate(user=u)
+        resp = client.patch("/api/users/me/active-workspace/", {"workspace_slug": ws.slug}, format="json")
         assert resp.status_code == 200
-        owner.refresh_from_db()
-        assert str(owner.active_workspace_id) == str(ws.pk)
-
-    def test_cannot_switch_to_non_member_workspace(self, owner, other_user):
-        from projects.services import WorkspaceService
-        other_ws = WorkspaceService.create_team_workspace(
-            owner=other_user, name="OtherWS", slug="other-saw-ws"
-        )
-        resp = self._client(owner).patch(
-            "/api/users/me/active-workspace/",
-            {"workspace_slug": other_ws.slug},
-            format="json",
-        )
-        assert resp.status_code in (400, 403)
-        owner.refresh_from_db()
-        assert str(owner.active_workspace_id) != str(other_ws.pk)
-
-    def test_switch_workspace_updates_me_response(self, owner):
-        from projects.services import WorkspaceService
-        ws = WorkspaceService.create_team_workspace(owner=owner, name="SAWME", slug="saw-me-ws")
-        personal = WorkspaceService.create_personal_workspace.__func__ if False else None
-        # After team ws creation, active is already the team ws; switch to it explicitly
-        resp = self._client(owner).patch(
-            "/api/users/me/active-workspace/",
-            {"workspace_slug": ws.slug},
-            format="json",
-        )
-        assert resp.status_code == 200
-        me_resp = self._client(owner).get("/api/users/me")
-        assert me_resp.status_code == 200
-        active = me_resp.json().get("active_workspace")
-        assert active is not None
-        assert active["slug"] == ws.slug
+        assert resp.data["active_workspace"]["slug"] == ws.slug

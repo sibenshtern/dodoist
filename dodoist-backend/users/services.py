@@ -142,19 +142,17 @@ class UserService:
                 from projects.invitations import InvitationService
                 InvitationService.accept(invite_token, user)
             except Exception:
-                pass  # invite failure must not block signup
+                pass  # don't block signup if invite is invalid/expired
 
         return user
 
     @staticmethod
     def set_active_workspace(user: User, workspace) -> User:
         from projects.models import WorkspaceMember
-        is_member = (
-            workspace.owner_id == user.pk
-            or WorkspaceMember.objects.filter(workspace=workspace, user=user).exists()
-        )
-        if not is_member:
-            raise ValueError("User is not a member of this workspace.")
+        if not user.has_elevated_access():
+            is_member = WorkspaceMember.objects.filter(workspace=workspace, user=user).exists()
+            if not is_member:
+                raise ValueError("User is not a member of this workspace.")
         user.active_workspace = workspace
         user.save(update_fields=["active_workspace"])
         return user

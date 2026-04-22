@@ -530,7 +530,8 @@ class DashboardStatsView(APIView):
     """
 
     def get(self, request):
-        from projects.request_helpers import get_active_workspace
+        from projects.request_helpers import _active_ws
+        active_ws = _active_ws(request)
         user = request.user
         now = tz.now()
         active_ws = get_active_workspace(request)
@@ -548,6 +549,8 @@ class DashboardStatsView(APIView):
             deleted_at__isnull=True,
             **ws_filter,
         )
+        if active_ws is not None:
+            base_qs = base_qs.filter(project__workspace=active_ws)
 
         yesterday = now - timedelta(days=1)
         monday_this_week = _get_monday_of_week(now)
@@ -588,10 +591,15 @@ class DashboardStatsView(APIView):
         else:
             done_this_week_delta_pct = 0
 
-        user_project_qs = ProjectMember.objects.filter(user=user)
-        if active_ws:
-            user_project_qs = user_project_qs.filter(project__workspace=active_ws)
-        user_project_ids = user_project_qs.values_list("project_id", flat=True)
+        overdue = base_qs.filter(
+            status__in=open_statuses,
+            due_date__lt=now,
+        ).count()
+
+        pm_qs = ProjectMember.objects.filter(user=user)
+        if active_ws is not None:
+            pm_qs = pm_qs.filter(project__workspace=active_ws)
+        user_project_ids = pm_qs.values_list("project_id", flat=True)
         active_sprint = (
             Sprint.objects.filter(
                 project_id__in=user_project_ids,
@@ -1078,8 +1086,8 @@ class TodayTasksView(APIView):
     """
 
     def get(self, request):
-        from projects.request_helpers import get_active_workspace
-        active_ws = get_active_workspace(request)
+        from projects.request_helpers import _active_ws
+        active_ws = _active_ws(request)
         now = tz.now()
         window_start = now - timedelta(days=2)
         window_end = now + timedelta(days=3)
@@ -1097,6 +1105,8 @@ class TodayTasksView(APIView):
             .prefetch_related("task_labels__label")
             .order_by("due_date")
         )
+        if active_ws is not None:
+            tasks = tasks.filter(project__workspace=active_ws)
 
         result = []
         for task in tasks:
@@ -1177,9 +1187,8 @@ class MyTasksView(APIView):
     """
 
     def get(self, request):
-        from projects.request_helpers import get_active_workspace
-        active_ws = get_active_workspace(request)
-        ws_filter = {"project__workspace": active_ws} if active_ws else {}
+        from projects.request_helpers import _active_ws
+        active_ws = _active_ws(request)
         qs = (
             Task.objects.filter(assigned_to=request.user, deleted_at__isnull=True, **ws_filter)
             .exclude(status="cancelled")
@@ -1187,6 +1196,8 @@ class MyTasksView(APIView):
             .prefetch_related("task_labels__label")
             .order_by("status", "position", "created_at")
         )
+        if active_ws is not None:
+            qs = qs.filter(project__workspace=active_ws)
 
         status_filter = request.query_params.get("status")
         if status_filter:
@@ -1298,20 +1309,30 @@ class TaskSearchView(APIView):
     """
 
     def get(self, request):
-        from projects.request_helpers import get_active_workspace
+        from projects.request_helpers import _active_ws
+        active_ws = _active_ws(request)
+
         q = request.query_params.get("q", "").strip()
         if len(q) < 2:
             return Response([])
 
-        active_ws = get_active_workspace(request)
-
-        # Determine which projects the caller can see within the active workspace
+        # Determine which projects the caller can see (scoped to active workspace)
         if request.user.has_elevated_access():
             project_qs = Project.objects.filter(status=ProjectStatus.ACTIVE)
         else:
             project_qs = Project.objects.filter(
-                members__user=request.user,
+                id__in=ProjectMember.objects.filter(user=request.user).values("project_id"),
                 status=ProjectStatus.ACTIVE,
+            )
+        if active_ws is not None:
+            project_qs = project_qs.filter(workspace=active_ws)
+        accessible_pids = project_qs.values_list("id", flat=True)
+
+        tasks = (
+            Task.objects.filter(
+                project_id__in=accessible_pids,
+                deleted_at__isnull=True,
+                title__icontains=q,
             )
         if active_ws:
             project_qs = project_qs.filter(workspace=active_ws)

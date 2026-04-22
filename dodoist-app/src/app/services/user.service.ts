@@ -10,7 +10,7 @@ export interface UserProfile {
   avatar_url: string;
   timezone: string;
   global_role: string;
-  active_workspace?: { id: string; slug: string; name: string; is_personal: boolean } | null;
+  active_workspace: Workspace | null;
 }
 
 export interface UserPreferences {
@@ -25,7 +25,7 @@ export interface Workspace {
   id: string;
   slug: string;
   name: string;
-  plan: string;
+  plan?: string;
   is_personal: boolean;
 }
 
@@ -43,29 +43,25 @@ export class UserService {
       .pipe(tap(user => {
         this.currentUser.set(user);
         if (user.active_workspace) {
-          this.currentWorkspace.set({
-            id: user.active_workspace.id,
-            slug: user.active_workspace.slug,
-            name: user.active_workspace.name,
-            plan: '',
-            is_personal: user.active_workspace.is_personal,
-          });
+          this.currentWorkspace.set(user.active_workspace);
         }
       }));
   }
 
   loadWorkspaces(): Observable<Workspace[]> {
+    return this.http.get<Workspace[]>(`${environment.apiBase}/api/workspaces/`);
+  }
+
+  switchWorkspace(ws: Workspace): Observable<UserProfile> {
     return this.http
-      .get<Workspace[]>(`${environment.apiBase}/api/workspaces/`)
-      .pipe(
-        tap(workspaces => {
-          this.workspaces.set(workspaces);
-          if (!this.currentWorkspace()) {
-            const personal = workspaces.find(w => w.is_personal) ?? workspaces[0] ?? null;
-            this.currentWorkspace.set(personal);
-          }
-        }),
-      );
+      .patch<UserProfile>(
+        `${environment.apiBase}/api/users/me/active-workspace/`,
+        { workspace_slug: ws.slug },
+      )
+      .pipe(tap(user => {
+        this.currentUser.set(user);
+        this.currentWorkspace.set(ws);
+      }));
   }
 
   switchWorkspace(workspace: Workspace): Observable<UserProfile> {

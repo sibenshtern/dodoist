@@ -56,7 +56,7 @@ class RegisterView(APIView):
                 password=data["password"],
                 display_name=data["display_name"],
                 user_timezone=data.get("timezone", "UTC"),
-                invite_token=data.get("invite_token") or request.data.get("invite_token"),
+                invite_token=data.get("invite_token") or None,
             )
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=400)
@@ -223,46 +223,46 @@ class MeView(APIView):
     """
     GET /api/users/me
 
-    Returns the authenticated user's profile, including active_workspace.
+    Returns the authenticated user's profile including active_workspace.
     """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        user = request.user
-        data = UserProfileSerializer(user).data
-        ws = user.active_workspace
-        data["active_workspace"] = (
-            {"id": str(ws.pk), "slug": ws.slug, "name": ws.name, "is_personal": ws.is_personal}
-            if ws else None
-        )
-        return Response(data)
+        user = User.objects.select_related("active_workspace").get(pk=request.user.pk)
+        return Response(UserProfileSerializer(user).data)
 
 
-class SetActiveWorkspaceView(APIView):
+class ActiveWorkspaceView(APIView):
     """
-    PATCH /api/users/me/active-workspace/  — switch the user's active workspace
+    PATCH /api/users/me/active-workspace/
+
+    Sets the authenticated user's active workspace.
+    Body: { workspace_slug } or { workspace_id }
     """
+    permission_classes = [IsAuthenticated]
 
     def patch(self, request):
-        slug = request.data.get("workspace_slug") or request.data.get("slug")
-        ws_id = request.data.get("workspace_id") or request.data.get("id")
-        if not slug and not ws_id:
+        from projects.models import Workspace
+        workspace_slug = request.data.get("workspace_slug")
+        workspace_id = request.data.get("workspace_id")
+        if workspace_slug:
+            try:
+                workspace = Workspace.objects.get(slug=workspace_slug, deleted_at__isnull=True)
+            except Workspace.DoesNotExist:
+                return Response({"detail": "Workspace not found."}, status=404)
+        elif workspace_id:
+            try:
+                workspace = Workspace.objects.get(pk=workspace_id, deleted_at__isnull=True)
+            except (Workspace.DoesNotExist, ValueError):
+                return Response({"detail": "Workspace not found."}, status=404)
+        else:
             return Response({"detail": "workspace_slug or workspace_id is required."}, status=400)
         try:
-            from projects.models import Workspace
-            if slug:
-                workspace = Workspace.objects.get(slug=slug)
-            else:
-                workspace = Workspace.objects.get(pk=ws_id)
-        except (Workspace.DoesNotExist, ValueError):
-            return Response({"detail": "Workspace not found."}, status=404)
-        try:
-            UserService.set_active_workspace(request.user, workspace)
+            user = UserService.set_active_workspace(request.user, workspace)
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=400)
-        data = UserProfileSerializer(request.user).data
-        data["active_workspace"] = {"id": str(workspace.pk), "slug": workspace.slug, "name": workspace.name, "is_personal": workspace.is_personal}
-        return Response(data)
+        user = User.objects.select_related("active_workspace").get(pk=user.pk)
+        return Response(UserProfileSerializer(user).data)
 
 
 class UserListView(APIView):
@@ -451,7 +451,7 @@ class NotificationListView(APIView):
     """
     def get(self, request):
         from projects.models import Project
-        from projects.request_helpers import get_active_workspace
+        from projects.request_helpers import _active_ws
         from users.models import Notification
         from users.serializers import NotificationSerializer
         qs = (
@@ -460,13 +460,14 @@ class NotificationListView(APIView):
             .select_related("actor")
             .order_by("-created_at")
         )
-        # Strict active-workspace filter: only show notifications tied to this workspace's projects/tasks.
-        active_ws = get_active_workspace(request)
-        if active_ws:
-            ws_project_ids = Project.objects.filter(workspace=active_ws).values_list("id", flat=True)
+        active_ws = _active_ws(request)
+        if active_ws is not None:
+            active_project_ids = Project.objects.filter(
+                workspace=active_ws
+            ).values_list("id", flat=True)
             qs = qs.filter(
-                models.Q(project_id__in=ws_project_ids)
-                | models.Q(project_id__isnull=True, task_id__isnull=True)
+                models.Q(project_id__in=active_project_ids)
+                | models.Q(project_id__isnull=True)
             )
         is_read = request.query_params.get("is_read")
         if is_read is not None:

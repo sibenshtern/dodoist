@@ -1,10 +1,10 @@
-from projects.models import Workspace
-
-
-def get_active_workspace(request) -> Workspace | None:
-    """Return the authenticated user's active workspace, falling back to their personal workspace."""
-    user = request.user
-    ws = user.active_workspace
+def _active_ws(request):
+    """
+    Returns the active workspace for the request user.
+    Falls back to the user's personal workspace if active_workspace is not set.
+    """
+    ws = getattr(request.user, "active_workspace", None)
     if ws is not None:
         return ws
-    return Workspace.objects.filter(owner=user, is_personal=True).first()
+    from .models import Workspace
+    return Workspace.objects.filter(owner=request.user, is_personal=True).first()

@@ -8,39 +8,14 @@
       <span class="brand-name">Dodoist</span>
     </div>
 
-    <div class="workspace-switcher-wrap">
-      <button class="workspace-switcher" (click)="wsDropdownOpen.update(v => !v)" [disabled]="isSwitching()">
-        <div class="workspace-icon">{{ isSwitching() ? '…' : workspaceInitial() }}</div>
-        <div class="workspace-info">
-          <span class="workspace-name">{{ workspaceName() }}</span>
-          <span class="workspace-plan">{{ workspacePlan() }}</span>
-        </div>
-        <tui-icon icon="@tui.chevron-down" class="workspace-chevron" [class.flipped]="wsDropdownOpen()" />
-      </button>
-      @if (wsDropdownOpen()) {
-        <div class="ws-dropdown">
-          @for (ws of workspaceList(); track ws.id) {
-            <button
-              class="ws-dropdown__item"
-              [class.ws-dropdown__item--active]="ws.id === userService.currentWorkspace()?.id"
-              [disabled]="isSwitching()"
-              (click)="switchWorkspace(ws)"
-            >
-              <span class="ws-dropdown__initial">{{ ws.name[0]?.toUpperCase() }}</span>
-              <span class="ws-dropdown__name">{{ ws.name }}</span>
-              @if (ws.id === userService.currentWorkspace()?.id) {
-                <tui-icon icon="@tui.check" class="ws-dropdown__check" />
-              }
-            </button>
-          }
-          <div class="ws-dropdown__divider"></div>
-          <a class="ws-dropdown__item ws-dropdown__manage" routerLink="/workspaces" (click)="wsDropdownOpen.set(false)">
-            <tui-icon icon="@tui.settings" />
-            Manage workspaces
-          </a>
-        </div>
-      }
-    </div>
+    <a class="workspace-switcher" routerLink="/workspaces">
+      <div class="workspace-icon">{{ workspaceInitial() }}</div>
+      <div class="workspace-info">
+        <span class="workspace-name">{{ workspaceName() }}</span>
+        <span class="workspace-plan">{{ workspacePlan() }}</span>
+      </div>
+      <tui-icon icon="@tui.chevron-down" class="workspace-chevron" />
+    </a>
 
     <button class="search-trigger" (click)="searchOpen.set(true)" title="Search tasks (⌘K)">
       <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">

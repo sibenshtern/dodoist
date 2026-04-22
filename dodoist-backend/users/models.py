@@ -35,6 +35,13 @@ class User(AbstractBaseUser):
     verification_token_expires_at = models.DateTimeField(null=True, blank=True)
     password_reset_token_hash = models.CharField(max_length=255, blank=True, default="")
     password_reset_expires_at = models.DateTimeField(null=True, blank=True)
+    active_workspace = models.ForeignKey(
+        "projects.Workspace",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+    )
     created_at = models.DateTimeField(default=tz.now)
     updated_at = models.DateTimeField(auto_now=True)
     # last_login is inherited from AbstractBaseUser (maps to last_login_at in schema)

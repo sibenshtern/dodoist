@@ -32,6 +32,11 @@ export const routes: Routes = [
       import('./pages/verify-email/verify-email.component').then(m => m.VerifyEmailComponent),
   },
   {
+    path: 'invites/:token',
+    loadComponent: () =>
+      import('./pages/invite-accept/invite-accept.component').then(m => m.InviteAcceptComponent),
+  },
+  {
     path: 'forgot-password',
     loadComponent: () =>
       import('./pages/forgot-password/forgot-password.component').then(m => m.ForgotPasswordComponent),
@@ -139,6 +144,21 @@ export const routes: Routes = [
         path: 'settings',
         loadComponent: () =>
           import('./pages/settings/settings.component').then(m => m.SettingsComponent),
+      },
+      {
+        path: 'workspaces',
+        loadComponent: () =>
+          import('./pages/workspaces/workspaces.component').then(m => m.WorkspacesComponent),
+      },
+      {
+        path: 'workspaces/:slug',
+        loadComponent: () =>
+          import('./pages/workspace-detail/workspace-detail.component').then(m => m.WorkspaceDetailComponent),
+      },
+      {
+        path: 'workspaces/:slug/members',
+        loadComponent: () =>
+          import('./pages/workspace-members/workspace-members.component').then(m => m.WorkspaceMembersComponent),
       },
     ],
   },

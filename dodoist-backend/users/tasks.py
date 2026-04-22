@@ -110,13 +110,34 @@ def send_workspace_invite_email(self, invite_id: str, raw_token: str) -> None:
     logger.info("Workspace invite email sent for invite %s", invite_id)
 
 
-@app.task(
-    bind=True,
-    autoretry_for=(Exception,),
-    retry_backoff=True,
-    max_retries=5,
-    default_retry_delay=60,
-)
+@app.task(bind=True, max_retries=3, default_retry_delay=60)
+def send_workspace_invite_email(self, invite_id: str, raw_token: str) -> None:
+    from projects.models import WorkspaceInvitation
+    try:
+        invite = WorkspaceInvitation.objects.select_related("workspace", "invited_by").get(pk=invite_id)
+    except WorkspaceInvitation.DoesNotExist:
+        return
+    link = f"{settings.FRONTEND_BASE_URL}/invites/{raw_token}"
+    inviter_name = invite.invited_by.display_name if invite.invited_by else "Someone"
+    role_label = invite.role_to_grant.capitalize()
+    try:
+        send_mail(
+            subject=f"You're invited to join '{invite.workspace.name}' on Dodoist",
+            message=(
+                f"Hi,\n\n"
+                f"{inviter_name} invited you to join '{invite.workspace.name}' as {role_label}.\n\n"
+                f"Accept the invitation:\n{link}\n\n"
+                f"This link expires in 7 days."
+            ),
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[invite.email],
+            fail_silently=False,
+        )
+    except Exception as exc:
+        raise self.retry(exc=exc)
+
+
+@app.task(bind=True, max_retries=3, default_retry_delay=60)
 def send_password_reset_email(self, user_id: str, token: str) -> None:
     from users.models import User
     try:

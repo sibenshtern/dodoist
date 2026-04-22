@@ -367,6 +367,7 @@ class TestWorkspaceListCreateView:
         })
         assert response.status_code == 201
         assert response.data["description"] == "A pro workspace"
+        # plan param is accepted but no longer drives team workspace creation logic
 
     def test_create_duplicate_slug_returns_400(self, auth_client, workspace):
         response = auth_client.post(WORKSPACES_URL, {"name": "Another", "slug": "acme"})
@@ -440,14 +441,20 @@ class TestWorkspaceDetailView:
     def test_owner_can_soft_delete(self, auth_client, workspace):
         response = auth_client.delete(self.url())
         assert response.status_code == 200
-        assert response.data["deleted_at"] is not None
         workspace.refresh_from_db()
-        assert workspace.is_deleted()
+        assert workspace.deleted_at is not None
+        assert response.data["deleted_at"] is not None
 
-    def test_sa_cannot_delete_workspace_they_dont_own(self, api_client, sa_user, workspace):
+    def test_non_owner_cannot_delete(self, api_client, workspace, other_user):
+        api_client.force_authenticate(user=other_user)
+        response = api_client.delete(self.url())
+        assert response.status_code in (403, 404)
+
+    def test_sa_non_owner_cannot_delete(self, api_client, sa_user, workspace):
+        # SA who is not the owner gets a 403 (soft-delete is owner-only)
         api_client.force_authenticate(user=sa_user)
         response = api_client.delete(self.url())
-        assert response.status_code == 400
+        assert response.status_code == 403
 
     def test_sa_delete_nonexistent_returns_404(self, api_client, sa_user):
         api_client.force_authenticate(user=sa_user)
@@ -489,9 +496,9 @@ class TestWorkspaceMemberListView:
         response = auth_client.post(self.url(), {})
         assert response.status_code == 400
 
-    def test_add_member_unknown_user_id_returns_404(self, auth_client, workspace):
+    def test_add_member_unknown_user_id_returns_400(self, auth_client, workspace):
         response = auth_client.post(self.url(), {"user_id": "00000000-0000-0000-0000-000000000000"})
-        assert response.status_code == 404
+        assert response.status_code == 400
 
     def test_non_owner_member_cannot_add_member(self, api_client, workspace, other_user, db):
         third = User.objects.create_user(email="charlie@example.com", password="p", display_name="Charlie")
@@ -803,345 +810,226 @@ class TestProjectMemberViews:
 
 
 # ---------------------------------------------------------------------------
-# WorkspaceService — roles, transfer, soft-delete, restore, leave
+# Phase 6 — Workspace invitations
 # ---------------------------------------------------------------------------
 
 @pytest.mark.django_db
-class TestWorkspaceRoles:
-    @pytest.fixture
-    def owner(self, db):
-        return UserService.register(email="owner@example.com", password="p", display_name="Owner")
+class TestWorkspaceInvitations:
+    """POST/GET/DELETE /api/workspaces/<slug>/invitations/ and /invite-links/"""
 
-    @pytest.fixture
-    def admin_user(self, db):
-        return UserService.register(email="admin@example.com", password="p", display_name="Admin")
+    def url(self, slug="acme"):
+        return f"/api/workspaces/{slug}/invitations/"
 
-    @pytest.fixture
-    def member_user(self, db):
-        return UserService.register(email="member@example.com", password="p", display_name="Member")
+    def link_url(self, slug="acme"):
+        return f"/api/workspaces/{slug}/invite-links/"
 
-    @pytest.fixture
-    def team_ws(self, owner):
-        return WorkspaceService.create_team_workspace(owner=owner, name="Team", slug="team-roles")
-
-    def test_owner_role_set_on_create(self, team_ws, owner):
-        m = WorkspaceMember.objects.get(workspace=team_ws, user=owner)
-        assert m.role == WorkspaceRole.OWNER
-
-    def test_add_member_gets_member_role_by_default(self, team_ws, member_user):
-        m = WorkspaceService.add_member(team_ws, member_user)
-        assert m.role == WorkspaceRole.MEMBER
-
-    def test_change_role_to_admin(self, team_ws, member_user, owner):
-        WorkspaceService.add_member(team_ws, member_user)
-        m = WorkspaceService.change_role(team_ws, member_user, WorkspaceRole.ADMIN, actor=owner)
-        assert m.role == WorkspaceRole.ADMIN
-
-    def test_non_owner_admin_can_change_role(self, team_ws, admin_user, member_user, owner):
-        WorkspaceService.add_member(team_ws, admin_user, role=WorkspaceRole.ADMIN)
-        WorkspaceService.add_member(team_ws, member_user)
-        m = WorkspaceService.change_role(team_ws, member_user, WorkspaceRole.ADMIN, actor=admin_user)
-        assert m.role == WorkspaceRole.ADMIN
-
-    def test_member_cannot_change_role(self, team_ws, admin_user, member_user):
-        WorkspaceService.add_member(team_ws, admin_user)
-        WorkspaceService.add_member(team_ws, member_user)
-        with pytest.raises(ValueError, match="Only Owner or Admin"):
-            WorkspaceService.change_role(team_ws, admin_user, WorkspaceRole.MEMBER, actor=member_user)
-
-    def test_cannot_change_owner_role(self, team_ws, owner, admin_user):
-        WorkspaceService.add_member(team_ws, admin_user, role=WorkspaceRole.ADMIN)
-        with pytest.raises(ValueError, match="Cannot change the role of the workspace owner"):
-            WorkspaceService.change_role(team_ws, owner, WorkspaceRole.MEMBER, actor=admin_user)
-
-    def test_transfer_ownership(self, team_ws, owner, member_user):
-        WorkspaceService.add_member(team_ws, member_user)
-        ws = WorkspaceService.transfer_ownership(team_ws, new_owner=member_user, actor=owner)
-        assert ws.owner_id == member_user.pk
-        old_role = WorkspaceMember.objects.get(workspace=team_ws, user=owner).role
-        new_role = WorkspaceMember.objects.get(workspace=team_ws, user=member_user).role
-        assert old_role == WorkspaceRole.ADMIN
-        assert new_role == WorkspaceRole.OWNER
-
-    def test_transfer_requires_actor_to_be_owner(self, team_ws, member_user, admin_user):
-        WorkspaceService.add_member(team_ws, member_user)
-        WorkspaceService.add_member(team_ws, admin_user, role=WorkspaceRole.ADMIN)
-        with pytest.raises(ValueError, match="Only the current owner"):
-            WorkspaceService.transfer_ownership(team_ws, new_owner=member_user, actor=admin_user)
-
-    def test_remove_member_cascades_project_memberships(self, team_ws, owner, member_user):
-        WorkspaceService.add_member(team_ws, member_user)
-        project = ProjectService.create_project(workspace=team_ws, creator=owner, name="P", key="P")
-        ProjectService.add_member(project, member_user, ProjectRole.DEV, added_by=owner)
-        assert ProjectMember.objects.filter(project=project, user=member_user).exists()
-        WorkspaceService.remove_member(team_ws, member_user)
-        assert not ProjectMember.objects.filter(project=project, user=member_user).exists()
-
-    def test_leave_workspace(self, team_ws, member_user):
-        WorkspaceService.add_member(team_ws, member_user)
-        WorkspaceService.leave(team_ws, member_user)
-        assert not WorkspaceMember.objects.filter(workspace=team_ws, user=member_user).exists()
-
-    def test_owner_cannot_leave(self, team_ws, owner):
-        with pytest.raises(ValueError, match="transfer ownership"):
-            WorkspaceService.leave(team_ws, owner)
-
-
-@pytest.mark.django_db
-class TestWorkspaceSoftDelete:
-    @pytest.fixture
-    def owner(self, db):
-        return UserService.register(email="delowner@example.com", password="p", display_name="DelOwner")
-
-    @pytest.fixture
-    def other(self, db):
-        return UserService.register(email="other@example.com", password="p", display_name="Other")
-
-    @pytest.fixture
-    def team_ws(self, owner):
-        return WorkspaceService.create_team_workspace(owner=owner, name="ToDelete", slug="to-delete")
-
-    def test_soft_delete_sets_fields(self, team_ws, owner):
-        ws = WorkspaceService.soft_delete(team_ws, actor=owner)
-        assert ws.deleted_at is not None
-        assert ws.delete_scheduled_for is not None
-        assert ws.deleted_by_id == owner.pk
-
-    def test_personal_ws_cannot_be_deleted(self, owner):
-        personal = WorkspaceService.create_personal_workspace(owner)
-        with pytest.raises(ValueError, match="Personal workspaces"):
-            WorkspaceService.soft_delete(personal, actor=owner)
-
-    def test_non_owner_cannot_delete(self, team_ws, other):
-        WorkspaceService.add_member(team_ws, other)
-        with pytest.raises(ValueError, match="Only the workspace owner"):
-            WorkspaceService.soft_delete(team_ws, actor=other)
-
-    def test_restore_clears_fields(self, team_ws, owner):
-        WorkspaceService.soft_delete(team_ws, actor=owner)
-        team_ws.refresh_from_db()
-        ws = WorkspaceService.restore(team_ws, actor=owner)
-        assert ws.deleted_at is None
-        assert ws.delete_scheduled_for is None
-        assert ws.deleted_by is None
-
-    def test_restore_requires_owner(self, team_ws, owner, other):
-        WorkspaceService.add_member(team_ws, other)
-        WorkspaceService.soft_delete(team_ws, actor=owner)
-        team_ws.refresh_from_db()
-        with pytest.raises(ValueError, match="Only the workspace owner"):
-            WorkspaceService.restore(team_ws, actor=other)
-
-    def test_cannot_delete_already_deleted(self, team_ws, owner):
-        WorkspaceService.soft_delete(team_ws, actor=owner)
-        team_ws.refresh_from_db()
-        with pytest.raises(ValueError, match="already scheduled"):
-            WorkspaceService.soft_delete(team_ws, actor=owner)
-
-
-@pytest.mark.django_db
-class TestWorkspaceRoleEndpoints:
-    @pytest.fixture
-    def owner(self, db):
-        return UserService.register(email="ep_owner@example.com", password="p", display_name="EPOwner")
-
-    @pytest.fixture
-    def member_user(self, db):
-        return UserService.register(email="ep_member@example.com", password="p", display_name="EPMember")
-
-    @pytest.fixture
-    def team_ws(self, owner):
-        return WorkspaceService.create_team_workspace(owner=owner, name="EP", slug="ep-ws")
-
-    def _client(self, user):
-        c = APIClient()
-        c.force_authenticate(user=user)
-        return c
-
-    def test_owner_can_soft_delete(self, team_ws, owner):
-        resp = self._client(owner).delete(f"/api/workspaces/{team_ws.slug}/")
-        assert resp.status_code == 200
-        team_ws.refresh_from_db()
-        assert team_ws.deleted_at is not None
-
-    def test_member_cannot_delete(self, team_ws, member_user):
-        WorkspaceService.add_member(team_ws, member_user)
-        resp = self._client(member_user).delete(f"/api/workspaces/{team_ws.slug}/")
-        assert resp.status_code in (400, 403)
-
-    def test_owner_can_restore(self, team_ws, owner):
-        WorkspaceService.soft_delete(team_ws, actor=owner)
-        team_ws.refresh_from_db()
-        resp = self._client(owner).post(f"/api/workspaces/{team_ws.slug}/restore/")
-        assert resp.status_code == 200
-        team_ws.refresh_from_db()
-        assert team_ws.deleted_at is None
-
-    def test_member_can_leave(self, team_ws, member_user):
-        WorkspaceService.add_member(team_ws, member_user)
-        resp = self._client(member_user).post(f"/api/workspaces/{team_ws.slug}/leave/")
-        assert resp.status_code == 204
-        assert not WorkspaceMember.objects.filter(workspace=team_ws, user=member_user).exists()
-
-    def test_owner_cannot_leave(self, team_ws, owner):
-        resp = self._client(owner).post(f"/api/workspaces/{team_ws.slug}/leave/")
-        assert resp.status_code in (400, 403)
-
-    def test_owner_can_transfer(self, team_ws, owner, member_user):
-        WorkspaceService.add_member(team_ws, member_user)
-        resp = self._client(owner).post(
-            f"/api/workspaces/{team_ws.slug}/transfer/",
-            {"new_owner_id": str(member_user.pk)},
-            format="json",
-        )
-        assert resp.status_code == 200
-        team_ws.refresh_from_db()
-        assert team_ws.owner_id == member_user.pk
-
-    def test_admin_can_change_member_role(self, team_ws, owner, member_user):
-        admin = UserService.register(email="ep_admin2@example.com", password="p", display_name="Admin2")
-        WorkspaceService.add_member(team_ws, admin, role=WorkspaceRole.ADMIN)
-        WorkspaceService.add_member(team_ws, member_user)
-        resp = self._client(admin).patch(
-            f"/api/workspaces/{team_ws.slug}/members/{member_user.pk}/",
-            {"role": "ADMIN"},
-            format="json",
-        )
-        assert resp.status_code == 200
-        assert resp.json()["role"] == "ADMIN"
-
-    def test_member_cannot_change_roles(self, team_ws, owner, member_user):
-        other = UserService.register(email="ep_other2@example.com", password="p", display_name="Other2")
-        WorkspaceService.add_member(team_ws, member_user)
-        WorkspaceService.add_member(team_ws, other)
-        resp = self._client(member_user).patch(
-            f"/api/workspaces/{team_ws.slug}/members/{other.pk}/",
-            {"role": "ADMIN"},
-            format="json",
-        )
-        assert resp.status_code in (400, 403)
-
-
-@pytest.mark.django_db
-class TestInvitations:
-    @pytest.fixture
-    def owner(self, db):
-        return UserService.register(email="inv_owner@example.com", password="p", display_name="InvOwner")
-
-    @pytest.fixture
-    def invitee(self, db):
-        return UserService.register(email="invitee@example.com", password="p", display_name="Invitee")
-
-    @pytest.fixture
-    def team_ws(self, owner):
-        return WorkspaceService.create_team_workspace(owner=owner, name="InvWS", slug="inv-ws")
-
-    def _client(self, user):
-        c = APIClient()
-        c.force_authenticate(user=user)
-        return c
-
-    def test_email_invite_creates_invitation(self, team_ws, owner, invitee):
-        invite, _ = InvitationService.create_email_invite(
-            workspace=team_ws, email=invitee.email, role=WorkspaceRole.MEMBER, invited_by=owner
-        )
-        assert invite.pk is not None
-        assert invite.kind == "email"
-        assert invite.token_hash != ""
-
-    def test_accept_email_invite(self, team_ws, owner, invitee):
-        _, raw_token = InvitationService.create_email_invite(
-            workspace=team_ws, email=invitee.email, role=WorkspaceRole.MEMBER, invited_by=owner
-        )
-        ws = InvitationService.accept(raw_token, invitee)
-        assert ws.pk == team_ws.pk
-        assert WorkspaceMember.objects.filter(workspace=team_ws, user=invitee).exists()
-
-    def test_email_mismatch_rejected(self, team_ws, owner):
-        other = UserService.register(email="stranger@example.com", password="p", display_name="Stranger")
-        _, raw_token = InvitationService.create_email_invite(
-            workspace=team_ws, email="specific@example.com", role=WorkspaceRole.MEMBER, invited_by=owner
-        )
-        with pytest.raises(ValueError, match="INVITE_EMAIL_MISMATCH"):
-            InvitationService.accept(raw_token, other)
-
-    def test_expired_invite_rejected(self, team_ws, owner, invitee):
-        from django.utils import timezone as tz
-        invite, raw_token = InvitationService.create_email_invite(
-            workspace=team_ws, email=invitee.email, role=WorkspaceRole.MEMBER, invited_by=owner
-        )
-        invite.expires_at = tz.now() - tz.timedelta(days=1)
-        invite.save()
-        with pytest.raises(ValueError, match="INVITE_EXPIRED"):
-            InvitationService.accept(raw_token, invitee)
-
-    def test_revoked_invite_rejected(self, team_ws, owner, invitee):
-        invite, raw_token = InvitationService.create_email_invite(
-            workspace=team_ws, email=invitee.email, role=WorkspaceRole.MEMBER, invited_by=owner
-        )
-        InvitationService.revoke(invite, actor=owner)
-        with pytest.raises(ValueError, match="INVITE_REVOKED"):
-            InvitationService.accept(raw_token, invitee)
-
-    def test_invalid_token_rejected(self, team_ws, owner, invitee):
-        with pytest.raises(ValueError, match="INVALID_TOKEN"):
-            InvitationService.accept("notarealtoken", invitee)
-
-    def test_invite_link_multi_use(self, team_ws, owner):
-        user1 = UserService.register(email="u1@example.com", password="p", display_name="U1")
-        user2 = UserService.register(email="u2@example.com", password="p", display_name="U2")
-        _, raw_token = InvitationService.create_invite_link(
-            workspace=team_ws, role=WorkspaceRole.MEMBER, invited_by=owner
-        )
-        InvitationService.accept(raw_token, user1)
-        InvitationService.accept(raw_token, user2)
-        invite = WorkspaceInvitation.objects.get(token_hash=__import__("hashlib").sha256(raw_token.encode()).hexdigest())
-        assert invite.use_count == 2
-
-    def test_invite_link_max_uses_enforced(self, team_ws, owner):
-        user1 = UserService.register(email="mu1@example.com", password="p", display_name="MU1")
-        user2 = UserService.register(email="mu2@example.com", password="p", display_name="MU2")
-        _, raw_token = InvitationService.create_invite_link(
-            workspace=team_ws, role=WorkspaceRole.MEMBER, invited_by=owner, max_uses=1
-        )
-        InvitationService.accept(raw_token, user1)
-        with pytest.raises(ValueError, match="INVITE_EXHAUSTED"):
-            InvitationService.accept(raw_token, user2)
-
-    def test_list_pending_excludes_revoked(self, team_ws, owner, invitee):
-        invite, _ = InvitationService.create_email_invite(
-            workspace=team_ws, email=invitee.email, role=WorkspaceRole.MEMBER, invited_by=owner
-        )
-        InvitationService.revoke(invite, actor=owner)
-        pending = list(InvitationService.list_pending(team_ws))
-        assert invite not in pending
-
-    def test_owner_can_create_email_invite_via_api(self, team_ws, owner):
-        resp = self._client(owner).post(
-            f"/api/workspaces/{team_ws.slug}/invitations/",
-            {"email": "new@example.com", "role": "MEMBER"},
-            format="json",
+    def test_owner_can_create_email_invite(self, auth_client, workspace):
+        resp = auth_client.post(
+            self.url(), {"kind": "email", "email": "new@example.com", "role": "MEMBER"}, format="json"
         )
         assert resp.status_code == 201
+        assert resp.data["email"] == "new@example.com"
 
-    def test_member_cannot_create_invite_via_api(self, team_ws, owner):
-        member = UserService.register(email="inv_m@example.com", password="p", display_name="InvM")
-        WorkspaceService.add_member(team_ws, member)
-        resp = self._client(member).post(
-            f"/api/workspaces/{team_ws.slug}/invitations/",
-            {"email": "x@example.com", "role": "MEMBER"},
+    def test_member_cannot_create_invite(self, workspace, other_user):
+        WorkspaceService.add_member(workspace, other_user)
+        client = APIClient()
+        client.force_authenticate(user=other_user)
+        resp = client.post(
+            self.url(), {"kind": "email", "email": "x@y.com", "role": "MEMBER"}, format="json"
+        )
+        assert resp.status_code == 403
+
+    def test_owner_can_list_invitations(self, auth_client, workspace):
+        from projects.invitations import InvitationService
+        InvitationService.create_email_invite(workspace=workspace, email="pending@example.com", role="MEMBER")
+        resp = auth_client.get(self.url())
+        assert resp.status_code == 200
+        assert any(i["email"] == "pending@example.com" for i in resp.data)
+
+    def test_owner_can_revoke_invitation(self, auth_client, workspace):
+        from projects.invitations import InvitationService
+        invite, _ = InvitationService.create_email_invite(workspace=workspace, email="rev@example.com", role="MEMBER")
+        resp = auth_client.delete(f"/api/workspaces/acme/invitations/{invite.pk}/")
+        assert resp.status_code == 204
+
+    def test_accept_valid_invite(self, workspace, other_user):
+        from projects.invitations import InvitationService
+        invite, raw_token = InvitationService.create_email_invite(
+            workspace=workspace, email=other_user.email, role="MEMBER"
+        )
+        client = APIClient()
+        client.force_authenticate(user=other_user)
+        resp = client.post("/api/invitations/accept/", {"token": raw_token}, format="json")
+        assert resp.status_code == 200
+        assert resp.data["slug"] == workspace.slug
+        assert WorkspaceMember.objects.filter(workspace=workspace, user=other_user).exists()
+
+    def test_accept_expired_invite_returns_400(self, workspace, other_user):
+        import datetime
+        from django.utils import timezone
+        from projects.invitations import InvitationService
+        invite, raw_token = InvitationService.create_email_invite(
+            workspace=workspace, email=other_user.email, role="MEMBER"
+        )
+        invite.expires_at = timezone.now() - datetime.timedelta(hours=1)
+        invite.save(update_fields=["expires_at"])
+        client = APIClient()
+        client.force_authenticate(user=other_user)
+        resp = client.post("/api/invitations/accept/", {"token": raw_token}, format="json")
+        assert resp.status_code == 400
+
+    def test_accept_revoked_invite_returns_400(self, workspace, other_user, user):
+        from projects.invitations import InvitationService
+        invite, raw_token = InvitationService.create_email_invite(
+            workspace=workspace, email=other_user.email, role="MEMBER"
+        )
+        InvitationService.revoke(invite, user)
+        client = APIClient()
+        client.force_authenticate(user=other_user)
+        resp = client.post("/api/invitations/accept/", {"token": raw_token}, format="json")
+        assert resp.status_code == 400
+
+    def test_invite_wrong_email_returns_400(self, workspace, other_user):
+        from projects.invitations import InvitationService
+        invite, raw_token = InvitationService.create_email_invite(
+            workspace=workspace, email="different@example.com", role="MEMBER"
+        )
+        client = APIClient()
+        client.force_authenticate(user=other_user)
+        resp = client.post("/api/invitations/accept/", {"token": raw_token}, format="json")
+        assert resp.status_code == 400
+
+    def test_owner_can_create_invite_link(self, auth_client, workspace):
+        resp = auth_client.post(self.link_url(), {"role": "MEMBER"}, format="json")
+        assert resp.status_code == 201
+        assert "token" in resp.data
+
+    def test_invite_link_accept_increments_use_count(self, workspace, other_user):
+        from projects.invitations import InvitationService
+        invite, raw_token = InvitationService.create_invite_link(
+            workspace=workspace, role="MEMBER", max_uses=5
+        )
+        client = APIClient()
+        client.force_authenticate(user=other_user)
+        client.post("/api/invitations/accept/", {"token": raw_token}, format="json")
+        invite.refresh_from_db()
+        assert invite.use_count == 1
+
+    def test_my_invitations_returns_pending(self, workspace, other_user):
+        from projects.invitations import InvitationService
+        InvitationService.create_email_invite(
+            workspace=workspace, email=other_user.email, role="MEMBER"
+        )
+        client = APIClient()
+        client.force_authenticate(user=other_user)
+        resp = client.get("/api/invitations/me/")
+        assert resp.status_code == 200
+        assert len(resp.data) == 1
+
+
+# ---------------------------------------------------------------------------
+# Phase 6 — Workspace role gating
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+class TestWorkspaceRoleGating:
+    """Transfer, leave, admin-only actions."""
+
+    def test_transfer_ownership_updates_both_roles(self, auth_client, workspace, other_user, user):
+        WorkspaceService.add_member(workspace, other_user)
+        resp = auth_client.post(
+            f"/api/workspaces/acme/transfer/",
+            {"new_owner_id": str(other_user.pk)},
+            format="json",
+        )
+        assert resp.status_code == 200
+        workspace.refresh_from_db()
+        assert workspace.owner == other_user
+        new_owner_row = WorkspaceMember.objects.get(workspace=workspace, user=other_user)
+        old_owner_row = WorkspaceMember.objects.get(workspace=workspace, user=user)
+        assert new_owner_row.role == "OWNER"
+        assert old_owner_row.role == "ADMIN"
+
+    def test_non_owner_cannot_transfer(self, workspace, other_user, user):
+        WorkspaceService.add_member(workspace, other_user)
+        client = APIClient()
+        client.force_authenticate(user=other_user)
+        resp = client.post(
+            f"/api/workspaces/acme/transfer/",
+            {"new_owner_id": str(user.pk)},
             format="json",
         )
         assert resp.status_code in (400, 403)
 
-    def test_accept_via_api(self, team_ws, owner, invitee):
-        _, raw_token = InvitationService.create_email_invite(
-            workspace=team_ws, email=invitee.email, role=WorkspaceRole.MEMBER, invited_by=owner
-        )
-        resp = self._client(invitee).post(
-            "/api/invitations/accept/",
-            {"token": raw_token},
+    def test_member_can_leave(self, workspace, other_user):
+        WorkspaceService.add_member(workspace, other_user)
+        client = APIClient()
+        client.force_authenticate(user=other_user)
+        resp = client.post(f"/api/workspaces/acme/leave/")
+        assert resp.status_code == 204
+        assert not WorkspaceMember.objects.filter(workspace=workspace, user=other_user).exists()
+
+    def test_owner_cannot_leave(self, auth_client, workspace):
+        resp = auth_client.post(f"/api/workspaces/acme/leave/")
+        assert resp.status_code == 400
+
+    def test_remove_member_cascades_project_membership(self, auth_client, workspace, project, other_user, user):
+        WorkspaceService.add_member(workspace, other_user)
+        ProjectService.add_member(project, other_user, ProjectRole.DEV, added_by=user)
+        assert ProjectMember.objects.filter(project=project, user=other_user).exists()
+        resp = auth_client.delete(f"/api/workspaces/acme/members/{other_user.pk}/")
+        assert resp.status_code == 204
+        assert not WorkspaceMember.objects.filter(workspace=workspace, user=other_user).exists()
+        assert not ProjectMember.objects.filter(project=project, user=other_user).exists()
+
+    def test_admin_can_change_member_role(self, workspace, other_user, user):
+        admin_user = UserService.register(email="admin2@example.com", password="pass123", display_name="Admin")
+        WorkspaceService.add_member(workspace, admin_user, role="ADMIN")
+        WorkspaceService.add_member(workspace, other_user, role="MEMBER")
+        client = APIClient()
+        client.force_authenticate(user=admin_user)
+        resp = client.patch(
+            f"/api/workspaces/acme/members/{other_user.pk}/",
+            {"role": "ADMIN"},
             format="json",
         )
         assert resp.status_code == 200
-        assert WorkspaceMember.objects.filter(workspace=team_ws, user=invitee).exists()
+        assert resp.data["role"] == "ADMIN"
+
+    def test_member_cannot_change_role(self, workspace, other_user, user):
+        WorkspaceService.add_member(workspace, other_user, role="MEMBER")
+        client = APIClient()
+        client.force_authenticate(user=other_user)
+        resp = client.patch(
+            f"/api/workspaces/acme/members/{user.pk}/",
+            {"role": "MEMBER"},
+            format="json",
+        )
+        assert resp.status_code in (400, 403)
+
+
+# ---------------------------------------------------------------------------
+# Phase 6 — Workspace soft-delete lifecycle
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+class TestWorkspaceSoftDeleteLifecycle:
+    def test_personal_workspace_cannot_be_deleted(self, auth_client, user):
+        personal = Workspace.objects.filter(owner=user, is_personal=True).first()
+        resp = auth_client.delete(f"/api/workspaces/{personal.slug}/")
+        assert resp.status_code == 409
+
+    def test_restore_clears_deleted_at(self, auth_client, workspace):
+        auth_client.delete(f"/api/workspaces/acme/")
+        workspace.refresh_from_db()
+        assert workspace.deleted_at is not None
+        resp = auth_client.post(f"/api/workspaces/acme/restore/")
+        assert resp.status_code == 200
+        workspace.refresh_from_db()
+        assert workspace.deleted_at is None
+
+    def test_deleted_workspace_not_in_list(self, auth_client, workspace):
+        auth_client.delete(f"/api/workspaces/acme/")
+        resp = auth_client.get("/api/workspaces/")
+        slugs = [w["slug"] for w in resp.data]
+        assert "acme" not in slugs

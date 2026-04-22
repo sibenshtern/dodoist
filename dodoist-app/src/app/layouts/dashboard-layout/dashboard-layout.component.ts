@@ -1,7 +1,8 @@
 import { Component, computed, HostListener, inject, OnDestroy, OnInit, signal } from '@angular/core';
 import { Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { TuiIcon } from '@taiga-ui/core';
-import { Subscription, switchMap, EMPTY, toObservable } from 'rxjs';
+import { interval, Subscription, switchMap, EMPTY } from 'rxjs';
+import { toObservable } from '@angular/core/rxjs-interop';
 import { UserService } from '../../services/user.service';
 import { AuthService } from '../../services/auth.service';
 import { DashboardService, ProjectSummary } from '../../services/dashboard.service';
@@ -30,6 +31,9 @@ export class DashboardLayoutComponent implements OnInit, OnDestroy {
   private readonly sseService = inject(SseService);
 
   private projectSub?: Subscription;
+
+  // toObservable must be created in injection context (class field, not ngOnInit)
+  private readonly workspace$ = toObservable(this.userService.currentWorkspace);
 
   readonly navItems: NavItem[] = [
     { label: 'Dashboard',  icon: '@tui.layout-dashboard', path: '/home' },
@@ -87,13 +91,12 @@ export class DashboardLayoutComponent implements OnInit, OnDestroy {
   });
 
   ngOnInit(): void {
-    if (!this.userService.currentUser()) {
-      this.userService.loadCurrentUser().subscribe({ error: console.error });
-    }
+    // Load user (hydrates currentWorkspace from active_workspace), then seed project list.
+    // After that, toObservable on currentWorkspace keeps the list in sync whenever the user
+    // switches workspace (e.g. from the /workspaces page).
+    this.userService.loadCurrentUser().subscribe({ error: console.error });
 
-    // Load workspaces; then reactively refetch projects whenever the active workspace changes.
-    this.projectSub = this.userService.loadWorkspaces().pipe(
-      switchMap(() => toObservable(this.userService.currentWorkspace)),
+    this.pollSub = this.workspace$.pipe(
       switchMap(ws => {
         if (!ws) return EMPTY;
         return this.dashboardService.getProjectsForActiveWorkspace(ws.slug);
@@ -105,7 +108,10 @@ export class DashboardLayoutComponent implements OnInit, OnDestroy {
 
     // Initial notification load; subsequent updates come through SSE.
     this.notifService.list({ limit: 50 }).subscribe({ error: console.error });
-    this.sseService.start();
+    const notifPoll = interval(60_000).subscribe(() => {
+      this.notifService.list({ limit: 50 }).subscribe({ error: console.error });
+    });
+    this.pollSub.add(notifPoll);
   }
 
   ngOnDestroy(): void {

@@ -46,6 +46,7 @@ class ActivityEntityType(models.TextChoices):
     PROJECT = "project", "Project"
     SPRINT = "sprint", "Sprint"
     COMMENT = "comment", "Comment"
+    WORKSPACE = "workspace", "Workspace"
 
 
 # ---------------------------------------------------------------------------
