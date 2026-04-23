@@ -1,0 +1,67 @@
+<div class="inbox-page">
+
+  <div class="inbox-page__header">
+    <h1 class="inbox-page__title">Inbox</h1>
+    @if (!isLoading()) {
+      <span class="inbox-page__meta">{{ totalCount() }} task{{ totalCount() === 1 ? '' : 's' }}</span>
+    }
+  </div>
+
+  <!-- Filters -->
+  <div class="filter-bar">
+    <div class="filter-group">
+      <span class="filter-group__label">Status</span>
+      @for (s of ['backlog','todo','in_progress','in_review','done']; track s) {
+        <button
+          class="filter-chip"
+          [class.filter-chip--active]="statusFilter() === s"
+          (click)="setStatus(s)"
+        >{{ s | titlecase }}</button>
+      }
+    </div>
+    <div class="filter-group">
+      <span class="filter-group__label">Priority</span>
+      @for (p of ['urgent','high','medium','low']; track p) {
+        <button
+          class="filter-chip"
+          [class.filter-chip--active]="priorityFilter() === p"
+          (click)="setPriority(p)"
+        >{{ p | titlecase }}</button>
+      }
+    </div>
+    @if (hasFilters()) {
+      <button class="filter-clear" (click)="clearFilters()">Clear</button>
+    }
+  </div>
+
+  @if (isLoading()) {
+    <div class="inbox-empty"><span class="inbox-empty__text">Loading…</span></div>
+  } @else if (totalCount() === 0) {
+    <div class="inbox-empty">
+      <tui-icon icon="@tui.inbox" class="inbox-empty__icon" />
+      <p class="inbox-empty__text">No tasks assigned to you{{ hasFilters() ? ' matching filters' : '' }}.</p>
+    </div>
+  } @else {
+    @for (group of groupedByProject(); track group.name) {
+      <section class="project-group">
+        <h2 class="project-group__name">{{ group.name }}</h2>
+        <ul class="task-list">
+          @for (task of group.tasks; track task.id) {
+            <li class="task-item">
+              <span class="task-item__priority" [style.background]="priorityColor(task.priority)" title="{{ task.priority }}"></span>
+              <a class="task-item__title" [routerLink]="['/task', task.id]">{{ task.title }}</a>
+              <span class="task-item__status">{{ task.status }}</span>
+              @if (task.due_date) {
+                <span class="task-item__due" [class.task-item__due--overdue]="task.is_overdue">
+                  <tui-icon icon="@tui.calendar" />
+                  {{ task.due_date | slice:0:10 }}
+                </span>
+              }
+            </li>
+          }
+        </ul>
+      </section>
+    }
+  }
+
+</div>

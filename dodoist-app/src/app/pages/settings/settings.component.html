@@ -1,0 +1,143 @@
+<div class="settings-page">
+
+  <h1 class="settings-page__title">Settings</h1>
+
+  <div class="settings-layout">
+
+    <!-- Tab nav -->
+    <nav class="settings-nav">
+      @for (tab of [['profile','Profile'],['preferences','Preferences'],['security','Security']]; track tab[0]) {
+        <button
+          class="settings-nav__item"
+          [class.settings-nav__item--active]="activeTab() === tab[0]"
+          (click)="setTab($any(tab[0]))"
+        >{{ tab[1] }}</button>
+      }
+    </nav>
+
+    <!-- Profile tab -->
+    @if (activeTab() === 'profile') {
+      <section class="settings-panel">
+        <h2 class="settings-panel__title">Profile</h2>
+        <form [formGroup]="profileForm" (ngSubmit)="saveProfile()" class="settings-form">
+          <div class="form-field">
+            <label class="form-label">Display name</label>
+            <input class="form-input" formControlName="display_name" placeholder="Your name" />
+          </div>
+          <div class="form-field">
+            <label class="form-label">Email</label>
+            <input class="form-input" [value]="userService.currentUser()?.email ?? ''" disabled />
+          </div>
+          <div class="form-field">
+            <label class="form-label">Timezone</label>
+            <select class="form-input form-select" formControlName="timezone">
+              @for (tz of ['UTC','Europe/Moscow','Europe/London','America/New_York','America/Los_Angeles','Asia/Tokyo']; track tz) {
+                <option [value]="tz">{{ tz }}</option>
+              }
+            </select>
+          </div>
+          @if (profileError()) { <p class="form-error">{{ profileError() }}</p> }
+          <div class="form-actions">
+            <button type="submit" class="btn-primary" [disabled]="profileSaving() || profileForm.invalid">
+              {{ profileSaving() ? 'Saving…' : 'Save profile' }}
+            </button>
+            @if (profileSaved()) { <span class="form-saved">Saved!</span> }
+          </div>
+        </form>
+      </section>
+    }
+
+    <!-- Preferences tab -->
+    @if (activeTab() === 'preferences') {
+      <section class="settings-panel">
+        <h2 class="settings-panel__title">Preferences</h2>
+        <form [formGroup]="prefForm" (ngSubmit)="savePreferences()" class="settings-form">
+
+          <div class="form-field">
+            <label class="form-label">Theme</label>
+            <select class="form-input form-select" formControlName="theme">
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+              <option value="system">System</option>
+            </select>
+          </div>
+
+          <div class="form-field">
+            <label class="form-label">Language</label>
+            <select class="form-input form-select" formControlName="language">
+              <option value="en">English</option>
+              <option value="ru">Русский</option>
+            </select>
+          </div>
+
+          <div class="form-field">
+            <label class="form-label">Default view</label>
+            <select class="form-input form-select" formControlName="default_view">
+              <option value="list">List</option>
+              <option value="board">Board</option>
+              <option value="calendar">Calendar</option>
+            </select>
+          </div>
+
+          <div class="form-field">
+            <label class="form-label">Digest frequency</label>
+            <select class="form-input form-select" formControlName="digest_frequency">
+              <option value="realtime">Realtime</option>
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+            </select>
+          </div>
+
+          <div class="form-field">
+            <label class="form-label">Notifications</label>
+            <div class="checkbox-group">
+              <label class="checkbox-row">
+                <input type="checkbox" formControlName="email_notif" /> Email
+              </label>
+              <label class="checkbox-row">
+                <input type="checkbox" formControlName="push_notif" /> Push
+              </label>
+              <label class="checkbox-row">
+                <input type="checkbox" formControlName="in_app_notif" /> In-app
+              </label>
+            </div>
+          </div>
+
+          @if (prefError()) { <p class="form-error">{{ prefError() }}</p> }
+          <div class="form-actions">
+            <button type="submit" class="btn-primary" [disabled]="prefSaving()">
+              {{ prefSaving() ? 'Saving…' : 'Save preferences' }}
+            </button>
+            @if (prefSaved()) { <span class="form-saved">Saved!</span> }
+          </div>
+        </form>
+      </section>
+    }
+
+    <!-- Security tab -->
+    @if (activeTab() === 'security') {
+      <section class="settings-panel">
+        <h2 class="settings-panel__title">Change password</h2>
+        <form [formGroup]="pwForm" (ngSubmit)="changePassword()" class="settings-form">
+          <div class="form-field">
+            <label class="form-label">Current password</label>
+            <input class="form-input" type="password" formControlName="current_password" autocomplete="current-password" />
+          </div>
+          <div class="form-field">
+            <label class="form-label">New password</label>
+            <input class="form-input" type="password" formControlName="new_password" autocomplete="new-password" placeholder="Min 8 characters" />
+          </div>
+          @if (pwError()) { <p class="form-error">{{ pwError() }}</p> }
+          <div class="form-actions">
+            <button type="submit" class="btn-primary" [disabled]="pwSaving() || pwForm.invalid">
+              {{ pwSaving() ? 'Saving…' : 'Change password' }}
+            </button>
+            @if (pwSaved()) { <span class="form-saved">Password updated!</span> }
+          </div>
+        </form>
+      </section>
+    }
+
+  </div>
+
+</div>

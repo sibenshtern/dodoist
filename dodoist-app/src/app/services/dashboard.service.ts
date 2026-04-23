@@ -21,6 +21,7 @@ export interface TodayTask {
   labelColor: string;
   labelBg: string;
   dueLabel: string;
+  dueDate: string | null;
   done: boolean;
 }
 
@@ -67,6 +68,7 @@ interface ApiTodayTask {
   label_name: string;
   label_color: string;
   due_label: string;
+  due_date: string | null;
   done: boolean;
 }
 
@@ -128,6 +130,7 @@ export class DashboardService {
           labelColor: t.label_color || '#6b7280',
           labelBg: hexToRgba(t.label_color || '#6b7280', 0.12),
           dueLabel: t.due_label,
+          dueDate: t.due_date,
           done: t.done,
         })),
       ),

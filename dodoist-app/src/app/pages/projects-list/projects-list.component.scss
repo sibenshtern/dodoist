@@ -1,0 +1,316 @@
+$red:        #db4035;
+$dark:       #1a1814;
+$gray:       #8a8680;
+$gray-lt:    #b0aea9;
+$border:     #e8e6e1;
+$bg-page:    #edebe6;
+$bg-surface: #fafaf8;
+$white:      #ffffff;
+$font-b:     'Manrope', sans-serif;
+$font-h:     'Lora', Georgia, serif;
+
+.projects-page {
+  padding: 40px 32px;
+  font-family: $font-b;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.projects-page__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 28px;
+}
+
+.projects-page__title {
+  font-family: $font-h;
+  font-size: 24px;
+  font-weight: 600;
+  color: $dark;
+  margin: 0;
+}
+
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: $red;
+  color: $white;
+  border: none;
+  border-radius: 7px;
+  font-family: $font-b;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.12s;
+
+  &:hover { opacity: 0.9; }
+  &:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  tui-icon { font-size: 14px; }
+}
+
+.btn-secondary {
+  padding: 8px 16px;
+  background: none;
+  border: 1.111px solid $border;
+  border-radius: 7px;
+  font-family: $font-b;
+  font-size: 13px;
+  font-weight: 500;
+  color: $gray;
+  cursor: pointer;
+  transition: all 0.12s;
+
+  &:hover { border-color: #ccc9c4; color: $dark; }
+}
+
+.projects-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 80px 0;
+  color: $gray-lt;
+}
+
+.projects-empty__icon { font-size: 48px; }
+
+.projects-empty__text {
+  font-size: 14px;
+  font-weight: 500;
+  margin: 0;
+}
+
+.projects-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.project-card {
+  border-radius: 10px;
+  background: $white;
+  border: 1.111px solid $border;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: box-shadow 0.15s;
+
+  &:hover { box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
+}
+
+.project-card__accent {
+  height: 4px;
+  flex-shrink: 0;
+}
+
+.project-card__body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+}
+
+.project-card__top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.project-card__key {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  color: $gray-lt;
+  background: $bg-page;
+  padding: 2px 7px;
+  border-radius: 4px;
+}
+
+.project-card__type {
+  font-size: 11px;
+  color: $gray-lt;
+}
+
+.project-card__name {
+  font-family: $font-b;
+  font-size: 14.5px;
+  font-weight: 600;
+  color: $dark;
+  margin: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.project-card__desc {
+  font-size: 12.5px;
+  color: $gray;
+  margin: 0;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.project-card__footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: auto;
+  padding-top: 8px;
+}
+
+.project-card__members,
+.project-card__sprint {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  color: $gray-lt;
+
+  tui-icon { font-size: 12px; }
+}
+
+// ── Dialog ─────────────────────────────────────────────────────────────────
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.dialog {
+  background: $white;
+  border-radius: 12px;
+  width: 480px;
+  max-width: calc(100vw - 32px);
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.18);
+}
+
+.dialog__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px 0;
+}
+
+.dialog__title {
+  font-family: $font-h;
+  font-size: 18px;
+  font-weight: 600;
+  color: $dark;
+  margin: 0;
+}
+
+.dialog__close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: $gray-lt;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  font-size: 16px;
+  transition: color 0.12s;
+
+  &:hover { color: $dark; }
+}
+
+.dialog__form {
+  padding: 20px 24px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.form-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: $gray;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.form-input {
+  padding: 8px 10px;
+  border: 1.111px solid $border;
+  border-radius: 6px;
+  font-family: $font-b;
+  font-size: 13px;
+  color: $dark;
+  background: $bg-surface;
+  outline: none;
+  transition: border-color 0.12s;
+
+  &:focus { border-color: $dark; }
+}
+
+.form-select { cursor: pointer; }
+
+.form-textarea { resize: vertical; min-height: 60px; }
+
+.color-picker {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.color-swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2.5px solid transparent;
+  cursor: pointer;
+  transition: transform 0.12s;
+
+  &:hover { transform: scale(1.15); }
+  &--active { border-color: $dark; transform: scale(1.1); }
+}
+
+.form-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: $dark;
+  cursor: pointer;
+
+  input { cursor: pointer; }
+}
+
+.form-error {
+  font-size: 12.5px;
+  color: $red;
+  margin: 0;
+}
+
+.dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 4px;
+}

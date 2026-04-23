@@ -58,17 +58,17 @@ export const routes: Routes = [
       {
         path: 'today',
         loadComponent: () =>
-          import('./pages/coming-soon/coming-soon.component').then(m => m.ComingSoonComponent),
+          import('./pages/today/today.component').then(m => m.TodayComponent),
       },
       {
         path: 'inbox',
         loadComponent: () =>
-          import('./pages/coming-soon/coming-soon.component').then(m => m.ComingSoonComponent),
+          import('./pages/inbox/inbox.component').then(m => m.InboxComponent),
       },
       {
         path: 'projects',
         loadComponent: () =>
-          import('./pages/coming-soon/coming-soon.component').then(m => m.ComingSoonComponent),
+          import('./pages/projects-list/projects-list.component').then(m => m.ProjectsListComponent),
       },
       {
         path: 'notifications',
@@ -78,7 +78,7 @@ export const routes: Routes = [
       {
         path: 'settings',
         loadComponent: () =>
-          import('./pages/coming-soon/coming-soon.component').then(m => m.ComingSoonComponent),
+          import('./pages/settings/settings.component').then(m => m.SettingsComponent),
       },
     ],
   },

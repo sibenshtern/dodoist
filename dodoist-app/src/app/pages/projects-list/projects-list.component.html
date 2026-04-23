@@ -1,0 +1,125 @@
+<div class="projects-page">
+
+  <div class="projects-page__header">
+    <h1 class="projects-page__title">Projects</h1>
+    <button class="btn-primary" (click)="openDialog()">
+      <tui-icon icon="@tui.plus" /> New project
+    </button>
+  </div>
+
+  @if (isLoading()) {
+    <div class="projects-empty"><span>Loading…</span></div>
+  } @else if (filteredProjects().length === 0) {
+    <div class="projects-empty">
+      <tui-icon icon="@tui.folder-open" class="projects-empty__icon" />
+      <p class="projects-empty__text">No projects yet. Create your first one!</p>
+      <button class="btn-primary" (click)="openDialog()">New project</button>
+    </div>
+  } @else {
+    <div class="projects-grid">
+      @for (p of filteredProjects(); track p.id) {
+        <div class="project-card">
+          <div class="project-card__accent" [style.background]="p.color || '#6b7280'"></div>
+          <div class="project-card__body">
+            <div class="project-card__top">
+              <span class="project-card__key">{{ p.key }}</span>
+              <span class="project-card__type">{{ typeLabel(p.type) }}</span>
+            </div>
+            <h3 class="project-card__name">{{ p.name }}</h3>
+            @if (p.description) {
+              <p class="project-card__desc">{{ p.description }}</p>
+            }
+            <div class="project-card__footer">
+              <span class="project-card__members">
+                <tui-icon icon="@tui.users" />
+                {{ p.member_count }} member{{ p.member_count === 1 ? '' : 's' }}
+              </span>
+              @if (p.active_sprint) {
+                <span class="project-card__sprint">
+                  <tui-icon icon="@tui.zap" />
+                  {{ p.active_sprint.name }}
+                </span>
+              }
+            </div>
+          </div>
+        </div>
+      }
+    </div>
+  }
+
+</div>
+
+<!-- New project dialog -->
+@if (showDialog()) {
+  <div class="dialog-backdrop" (click)="closeDialog()">
+    <div class="dialog" (click)="$event.stopPropagation()">
+
+      <div class="dialog__header">
+        <h2 class="dialog__title">New project</h2>
+        <button class="dialog__close" (click)="closeDialog()">
+          <tui-icon icon="@tui.x" />
+        </button>
+      </div>
+
+      <form [formGroup]="form" (ngSubmit)="submit()" class="dialog__form">
+
+        <div class="form-field">
+          <label class="form-label">Name *</label>
+          <input class="form-input" formControlName="name" placeholder="My project" (input)="autoKey()" />
+        </div>
+
+        <div class="form-row">
+          <div class="form-field">
+            <label class="form-label">Key *</label>
+            <input class="form-input" formControlName="key" placeholder="MYPROJ" maxlength="10" style="text-transform:uppercase" />
+          </div>
+          <div class="form-field">
+            <label class="form-label">Type</label>
+            <select class="form-input form-select" formControlName="type">
+              <option value="kanban">Kanban</option>
+              <option value="scrum">Scrum</option>
+              <option value="personal">Personal</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-field">
+          <label class="form-label">Color</label>
+          <div class="color-picker">
+            @for (c of colors; track c) {
+              <button
+                type="button"
+                class="color-swatch"
+                [class.color-swatch--active]="form.controls.color.value === c"
+                [style.background]="c"
+                (click)="selectColor(c)"
+              ></button>
+            }
+          </div>
+        </div>
+
+        <div class="form-field">
+          <label class="form-label">Description</label>
+          <textarea class="form-input form-textarea" formControlName="description" placeholder="Optional description" rows="2"></textarea>
+        </div>
+
+        <label class="form-checkbox">
+          <input type="checkbox" formControlName="is_private" />
+          Private project
+        </label>
+
+        @if (saveError()) {
+          <p class="form-error">{{ saveError() }}</p>
+        }
+
+        <div class="dialog__actions">
+          <button type="button" class="btn-secondary" (click)="closeDialog()">Cancel</button>
+          <button type="submit" class="btn-primary" [disabled]="form.invalid || isSaving()">
+            {{ isSaving() ? 'Creating…' : 'Create project' }}
+          </button>
+        </div>
+
+      </form>
+    </div>
+  </div>
+}

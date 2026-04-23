@@ -1,0 +1,93 @@
+<div class="today-page">
+
+  <div class="today-page__header">
+    <h1 class="today-page__title">Today</h1>
+    @if (!isLoading() && totalCount() > 0) {
+      <span class="today-page__meta">{{ doneCount() }} / {{ totalCount() }} done</span>
+    }
+  </div>
+
+  @if (isLoading()) {
+    <div class="today-empty"><span class="today-empty__text">Loading…</span></div>
+  } @else if (totalCount() === 0) {
+    <div class="today-empty">
+      <tui-icon icon="@tui.sun" class="today-empty__icon" />
+      <p class="today-empty__text">All clear — nothing due today or soon.</p>
+    </div>
+  } @else {
+
+    @if (overdueGroup().length > 0) {
+      <section class="task-group">
+        <h2 class="task-group__heading task-group__heading--overdue">
+          <tui-icon icon="@tui.alert-circle" class="task-group__icon" />
+          Overdue · {{ overdueGroup().length }}
+        </h2>
+        <ul class="task-list">
+          @for (task of overdueGroup(); track task.id) {
+            <li class="task-item" [class.task-item--done]="task.done">
+              <button class="task-item__check" (click)="toggle(task)" [attr.aria-label]="task.done ? 'Mark undone' : 'Mark done'">
+                @if (task.done) { <tui-icon icon="@tui.check-circle" /> }
+                @else { <tui-icon icon="@tui.circle" /> }
+              </button>
+              <a class="task-item__title" [routerLink]="['/task', task.id]">{{ task.title }}</a>
+              @if (task.label) {
+                <span class="task-item__label" [style.color]="task.labelColor" [style.background]="task.labelBg">{{ task.label }}</span>
+              }
+              <span class="task-item__due task-item__due--overdue">{{ task.dueLabel }}</span>
+            </li>
+          }
+        </ul>
+      </section>
+    }
+
+    @if (todayGroup().length > 0) {
+      <section class="task-group">
+        <h2 class="task-group__heading">
+          <tui-icon icon="@tui.sun" class="task-group__icon" />
+          Today · {{ todayGroup().length }}
+        </h2>
+        <ul class="task-list">
+          @for (task of todayGroup(); track task.id) {
+            <li class="task-item" [class.task-item--done]="task.done">
+              <button class="task-item__check" (click)="toggle(task)">
+                @if (task.done) { <tui-icon icon="@tui.check-circle" /> }
+                @else { <tui-icon icon="@tui.circle" /> }
+              </button>
+              <a class="task-item__title" [routerLink]="['/task', task.id]">{{ task.title }}</a>
+              @if (task.label) {
+                <span class="task-item__label" [style.color]="task.labelColor" [style.background]="task.labelBg">{{ task.label }}</span>
+              }
+              <span class="task-item__due">Today</span>
+            </li>
+          }
+        </ul>
+      </section>
+    }
+
+    @if (upcomingGroup().length > 0) {
+      <section class="task-group">
+        <h2 class="task-group__heading task-group__heading--upcoming">
+          <tui-icon icon="@tui.clock" class="task-group__icon" />
+          Upcoming · {{ upcomingGroup().length }}
+        </h2>
+        <ul class="task-list">
+          @for (task of upcomingGroup(); track task.id) {
+            <li class="task-item" [class.task-item--done]="task.done">
+              <button class="task-item__check" (click)="toggle(task)">
+                @if (task.done) { <tui-icon icon="@tui.check-circle" /> }
+                @else { <tui-icon icon="@tui.circle" /> }
+              </button>
+              <a class="task-item__title" [routerLink]="['/task', task.id]">{{ task.title }}</a>
+              @if (task.label) {
+                <span class="task-item__label" [style.color]="task.labelColor" [style.background]="task.labelBg">{{ task.label }}</span>
+              }
+              <span class="task-item__due">{{ task.dueLabel }}</span>
+            </li>
+          }
+        </ul>
+      </section>
+    }
+
+  }
+
+</div>
