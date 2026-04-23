@@ -1059,6 +1059,7 @@ class TodayTasksView(APIView):
                 "label_name": label_name,
                 "label_color": label_color,
                 "due_label": _due_label(task.due_date, now),
+                "due_date": task.due_date.isoformat() if task.due_date else None,
                 "done": task.status == TaskStatus.DONE,
             })
 

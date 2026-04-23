@@ -294,6 +294,19 @@ class UserPreferencesView(APIView):
         prefs.save()
         return Response(UserPreferencesSerializer(prefs).data)
 
+    def patch(self, request, pk):
+        target, err = self._check_access(request, pk)
+        if err:
+            return err
+        serializer = UserPreferencesUpdateSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        prefs = get_object_or_404(UserPreferences, user=target)
+        for field, value in data.items():
+            setattr(prefs, field, value)
+        prefs.save()
+        return Response(UserPreferencesSerializer(prefs).data)
+
 
 def _create_session_for_user(user, request):
     """
