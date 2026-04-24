@@ -223,9 +223,17 @@ $font-b: 'Manrope', sans-serif;
   border: none;
   cursor: pointer;
   text-align: left;
+  text-decoration: none;
   transition: background 0.12s, color 0.12s;
 
   &:hover { background: $bg-page; color: $dark; }
+
+  &--active {
+    background: #fff0ef;
+    color: $red;
+    font-weight: 600;
+    .project-nav-dot { box-shadow: 0 0 0 2px rgba($red, 0.3); }
+  }
 }
 
 .project-nav-dot {

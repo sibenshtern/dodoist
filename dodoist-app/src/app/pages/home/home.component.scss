@@ -312,6 +312,9 @@ $font-b: 'Manrope', sans-serif;
   flex-direction: column;
   gap: 10px;
   transition: background 0.1s;
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
 
   &:last-child { border-bottom: none; }
   &:hover { background: #fdfcfb; }

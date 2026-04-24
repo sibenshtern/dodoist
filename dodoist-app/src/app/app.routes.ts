@@ -71,6 +71,11 @@ export const routes: Routes = [
           import('./pages/projects-list/projects-list.component').then(m => m.ProjectsListComponent),
       },
       {
+        path: 'projects/:id',
+        loadComponent: () =>
+          import('./pages/project-detail/project-detail.component').then(m => m.ProjectDetailComponent),
+      },
+      {
         path: 'notifications',
         loadComponent: () =>
           import('./pages/notifications/notifications.component').then(m => m.NotificationsComponent),

@@ -13,12 +13,12 @@
     <div class="projects-empty">
       <tui-icon icon="@tui.folder-open" class="projects-empty__icon" />
       <p class="projects-empty__text">No projects yet. Create your first one!</p>
-      <button class="btn-primary" (click)="openDialog()">New project</button>
+      <button class="btn-primary" (click)="openDialog()"><tui-icon icon="@tui.plus" /> New project</button>
     </div>
   } @else {
     <div class="projects-grid">
       @for (p of filteredProjects(); track p.id) {
-        <div class="project-card">
+        <div class="project-card" [routerLink]="['/projects', p.id]" style="cursor:pointer">
           <div class="project-card__accent" [style.background]="p.color || '#6b7280'"></div>
           <div class="project-card__body">
             <div class="project-card__top">

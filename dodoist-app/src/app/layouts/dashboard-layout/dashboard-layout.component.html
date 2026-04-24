@@ -33,10 +33,10 @@
     <div class="sidebar-section">
       <span class="sidebar-section__label">Projects</span>
       @for (project of projects(); track project.id) {
-        <button class="project-nav-item">
+        <a class="project-nav-item" [routerLink]="['/projects', project.id]" routerLinkActive="project-nav-item--active">
           <span class="project-nav-dot" [style.background]="project.color"></span>
           {{ project.name }}
-        </button>
+        </a>
       }
     </div>
 

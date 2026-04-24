@@ -1,5 +1,6 @@
 import { Component, inject, signal, computed, OnInit } from '@angular/core';
 import { Router } from '@angular/router';
+import { TuiIcon } from '@taiga-ui/core';
 import { TaskService, Task } from '../../services/task.service';
 import { hexToRgba } from '../../utils/color.util';
 
@@ -12,7 +13,7 @@ interface Column {
 @Component({
   selector: 'app-my-tasks',
   standalone: true,
-  imports: [],
+  imports: [TuiIcon],
   templateUrl: './my-tasks.component.html',
   styleUrl: './my-tasks.component.scss',
 })

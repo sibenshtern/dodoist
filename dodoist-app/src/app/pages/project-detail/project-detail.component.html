@@ -1,0 +1,534 @@
+@if (isLoading()) {
+  <div class="pd-loading">Loading…</div>
+} @else if (!project()) {
+  <div class="pd-loading">Project not found.</div>
+} @else {
+
+<div class="pd-page">
+
+  <!-- Header -->
+  <div class="pd-header">
+    <div class="pd-header__left">
+      <div class="pd-accent" [style.background]="project()!.color || '#6b7280'"></div>
+      <div>
+        <div class="pd-header__meta">
+          <a class="pd-breadcrumb" [routerLink]="['/projects']">Projects</a>
+          <span class="pd-breadcrumb-sep">/</span>
+          <span class="pd-header__key">{{ project()!.key }}</span>
+          @if (project()!.archived_at) {
+            <span class="pd-badge pd-badge--archived">Archived</span>
+          }
+        </div>
+        <h1 class="pd-header__name">{{ project()!.name }}</h1>
+        @if (project()!.description) {
+          <p class="pd-header__desc">{{ project()!.description }}</p>
+        }
+      </div>
+    </div>
+    <div class="pd-header__right">
+      <span class="pd-stat"><tui-icon icon="@tui.users" />{{ members().length }}</span>
+      <span class="pd-stat pd-stat--type">{{ project()!.type }}</span>
+    </div>
+  </div>
+
+  <!-- Tab nav -->
+  <nav class="pd-tabs">
+    @for (t of [
+      ['overview','Overview'],['sprints','Sprints'],['members','Members'],
+      ['labels','Labels'],['custom-fields','Fields'],['settings','Settings']
+    ]; track t[0]) {
+      <button
+        class="pd-tab"
+        [class.pd-tab--active]="activeTab() === t[0]"
+        (click)="setTab($any(t[0]))"
+      >{{ t[1] }}</button>
+    }
+  </nav>
+
+  <!-- ── Overview ─────────────────────────────────────────────────────────── -->
+  @if (activeTab() === 'overview') {
+    <div class="pd-panel">
+      <div class="pd-overview-grid">
+        <div class="pd-info-card">
+          <h3 class="pd-info-card__title">Details</h3>
+          <dl class="pd-dl">
+            <dt>Type</dt>   <dd>{{ project()!.type }}</dd>
+            <dt>Status</dt> <dd>{{ project()!.status }}</dd>
+            <dt>Privacy</dt><dd>{{ project()!.is_private ? 'Private' : 'Public' }}</dd>
+            <dt>Members</dt><dd>{{ members().length }}</dd>
+            <dt>Created</dt><dd>{{ project()!.created_at | slice:0:10 }}</dd>
+          </dl>
+        </div>
+
+        <div class="pd-info-card">
+          <h3 class="pd-info-card__title">Active sprint</h3>
+          @if (activeSprints().length) {
+            @for (s of activeSprints(); track s.id) {
+              <div class="pd-sprint-brief">
+                <span class="pd-sprint-brief__name">{{ s.name }}</span>
+                @if (s.end_date) {
+                  <span class="pd-sprint-brief__date">ends {{ s.end_date }}</span>
+                }
+              </div>
+            }
+          } @else {
+            <p class="pd-muted">No active sprint.</p>
+          }
+        </div>
+
+        <div class="pd-info-card">
+          <h3 class="pd-info-card__title">Members</h3>
+          <ul class="pd-member-chips">
+            @for (m of members().slice(0, 6); track m.id) {
+              <li class="pd-avatar" [title]="m.user.display_name">
+                {{ m.user.display_name[0].toUpperCase() }}
+              </li>
+            }
+            @if (members().length > 6) {
+              <li class="pd-avatar pd-avatar--more">+{{ members().length - 6 }}</li>
+            }
+          </ul>
+        </div>
+      </div>
+    </div>
+  }
+
+  <!-- ── Sprints ───────────────────────────────────────────────────────────── -->
+  @if (activeTab() === 'sprints') {
+    <div class="pd-panel">
+      <div class="pd-panel-header">
+        <h2 class="pd-panel-title">Sprints</h2>
+        <button class="btn-primary" (click)="openSprintDialog()">
+          <tui-icon icon="@tui.plus" /> New sprint
+        </button>
+      </div>
+
+      @if (sprints().length === 0) {
+        <div class="pd-empty">
+          <tui-icon icon="@tui.zap" class="pd-empty__icon" />
+          <p>No sprints yet.</p>
+        </div>
+      } @else {
+        @for (sprint of activeSprints(); track sprint.id) {
+          <div class="sprint-card sprint-card--active">
+            <div class="sprint-card__head">
+              <span class="sprint-card__name">{{ sprint.name }}</span>
+              <span class="sprint-badge sprint-badge--active">Active</span>
+              <button class="btn-sm btn-danger" (click)="openCompleteDialog(sprint)">Complete</button>
+            </div>
+            @if (sprint.goal) { <p class="sprint-card__goal">{{ sprint.goal }}</p> }
+            @if (sprint.start_date || sprint.end_date) {
+              <div class="sprint-card__dates">
+                {{ sprint.start_date ?? '?' }} → {{ sprint.end_date ?? '?' }}
+              </div>
+            }
+          </div>
+        }
+
+        @for (sprint of plannedSprints(); track sprint.id) {
+          <div class="sprint-card">
+            <div class="sprint-card__head">
+              <span class="sprint-card__name">{{ sprint.name }}</span>
+              <span class="sprint-badge">Planned</span>
+              <button class="btn-sm" (click)="startSprint(sprint)">Start</button>
+            </div>
+            @if (sprint.goal) { <p class="sprint-card__goal">{{ sprint.goal }}</p> }
+            @if (sprint.start_date || sprint.end_date) {
+              <div class="sprint-card__dates">
+                {{ sprint.start_date ?? '?' }} → {{ sprint.end_date ?? '?' }}
+              </div>
+            }
+          </div>
+        }
+
+        @if (completedSprints().length) {
+          <h3 class="pd-section-label">Completed ({{ completedSprints().length }})</h3>
+          @for (sprint of completedSprints(); track sprint.id) {
+            <div class="sprint-card sprint-card--done">
+              <div class="sprint-card__head">
+                <span class="sprint-card__name">{{ sprint.name }}</span>
+                <span class="sprint-badge sprint-badge--done">Completed</span>
+                @if (sprint.completed_at) {
+                  <span class="sprint-card__dates">{{ sprint.completed_at | slice:0:10 }}</span>
+                }
+              </div>
+            </div>
+          }
+        }
+      }
+    </div>
+  }
+
+  <!-- ── Members ───────────────────────────────────────────────────────────── -->
+  @if (activeTab() === 'members') {
+    <div class="pd-panel">
+      <div class="pd-panel-header">
+        <h2 class="pd-panel-title">Members ({{ members().length }})</h2>
+        <button class="btn-primary" (click)="openMemberDialog()">
+          <tui-icon icon="@tui.plus" /> Add member
+        </button>
+      </div>
+
+      @if (members().length === 0) {
+        <div class="pd-empty"><p>No members yet.</p></div>
+      } @else {
+        <table class="pd-table">
+          <thead>
+            <tr>
+              <th>User</th>
+              <th>Role</th>
+              <th>Joined</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (m of members(); track m.id) {
+              <tr>
+                <td>
+                  <div class="pd-user-cell">
+                    <span class="pd-avatar pd-avatar--sm">{{ m.user.display_name[0].toUpperCase() }}</span>
+                    <div>
+                      <div class="pd-user-cell__name">{{ m.user.display_name }}</div>
+                      <div class="pd-user-cell__email">{{ m.user.email }}</div>
+                    </div>
+                  </div>
+                </td>
+                <td>
+                  <select class="pd-select" [value]="m.role" (change)="changeRole(m, $any($event.target).value)">
+                    @for (r of projectRoles; track r) {
+                      <option [value]="r">{{ roleLabel(r) }}</option>
+                    }
+                  </select>
+                </td>
+                <td class="pd-muted">{{ m.joined_at | slice:0:10 }}</td>
+                <td>
+                  <button class="btn-icon" (click)="removeMember(m)" title="Remove">
+                    <tui-icon icon="@tui.x" />
+                  </button>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      }
+    </div>
+  }
+
+  <!-- ── Labels ────────────────────────────────────────────────────────────── -->
+  @if (activeTab() === 'labels') {
+    <div class="pd-panel">
+      <div class="pd-panel-header">
+        <h2 class="pd-panel-title">Labels</h2>
+        <button class="btn-primary" (click)="openLabelDialog()">
+          <tui-icon icon="@tui.plus" /> New label
+        </button>
+      </div>
+
+      @if (labels().length === 0) {
+        <div class="pd-empty">
+          <tui-icon icon="@tui.tag" class="pd-empty__icon" />
+          <p>No labels yet.</p>
+        </div>
+      } @else {
+        <ul class="pd-label-list">
+          @for (l of labels(); track l.id) {
+            <li class="pd-label-item">
+              <span class="pd-label-dot" [style.background]="l.color"></span>
+              <span class="pd-label-name">{{ l.name }}</span>
+              <div class="pd-label-actions">
+                <button class="btn-icon" (click)="openLabelDialog(l)" title="Edit">
+                  <tui-icon icon="@tui.pencil" />
+                </button>
+                <button class="btn-icon btn-icon--danger" (click)="deleteLabel(l)" title="Delete">
+                  <tui-icon icon="@tui.trash-2" />
+                </button>
+              </div>
+            </li>
+          }
+        </ul>
+      }
+    </div>
+  }
+
+  <!-- ── Custom Fields ─────────────────────────────────────────────────────── -->
+  @if (activeTab() === 'custom-fields') {
+    <div class="pd-panel">
+      <div class="pd-panel-header">
+        <h2 class="pd-panel-title">Custom Fields</h2>
+        <button class="btn-primary" (click)="openFieldDialog()">
+          <tui-icon icon="@tui.plus" /> New field
+        </button>
+      </div>
+
+      @if (customFields().length === 0) {
+        <div class="pd-empty">
+          <tui-icon icon="@tui.sliders" class="pd-empty__icon" />
+          <p>No custom fields defined.</p>
+        </div>
+      } @else {
+        <ul class="pd-field-list">
+          @for (f of customFields(); track f.id) {
+            <li class="pd-field-item">
+              <div class="pd-field-item__info">
+                <span class="pd-field-item__name">{{ f.name }}</span>
+                <span class="pd-field-item__type">{{ f.field_type }}</span>
+                @if (f.is_required) { <span class="pd-badge pd-badge--req">Required</span> }
+              </div>
+              <button class="btn-icon btn-icon--danger" (click)="deleteField(f)" title="Delete">
+                <tui-icon icon="@tui.trash-2" />
+              </button>
+            </li>
+          }
+        </ul>
+      }
+    </div>
+  }
+
+  <!-- ── Settings ──────────────────────────────────────────────────────────── -->
+  @if (activeTab() === 'settings') {
+    <div class="pd-panel">
+      <h2 class="pd-panel-title">Project settings</h2>
+      <form [formGroup]="settingsForm" (ngSubmit)="saveSettings()" class="pd-form">
+        <div class="form-field">
+          <label class="form-label">Name</label>
+          <input class="form-input" formControlName="name" />
+        </div>
+        <div class="form-field">
+          <label class="form-label">Description</label>
+          <textarea class="form-input form-textarea" formControlName="description" rows="3"></textarea>
+        </div>
+        <div class="form-field">
+          <label class="form-label">Color</label>
+          <div class="color-picker">
+            @for (c of labelColors; track c) {
+              <button
+                type="button"
+                class="color-swatch"
+                [class.color-swatch--active]="settingsForm.controls.color.value === c"
+                [style.background]="c"
+                (click)="settingsForm.patchValue({ color: c })"
+              ></button>
+            }
+          </div>
+        </div>
+        <label class="form-checkbox">
+          <input type="checkbox" formControlName="is_private" /> Private project
+        </label>
+
+        @if (settingsError()) { <p class="form-error">{{ settingsError() }}</p> }
+        <div class="form-actions">
+          <button type="submit" class="btn-primary" [disabled]="settingsForm.invalid || settingsSaving()">
+            {{ settingsSaving() ? 'Saving…' : 'Save settings' }}
+          </button>
+          @if (settingsSaved()) { <span class="form-saved">Saved!</span> }
+        </div>
+      </form>
+
+      <hr class="pd-divider" />
+
+      <div class="pd-danger-zone">
+        <h3 class="pd-danger-zone__title">Danger zone</h3>
+        <button class="btn-danger-outline" (click)="archiveProject()">
+          {{ project()!.archived_at ? 'Unarchive project' : 'Archive project' }}
+        </button>
+      </div>
+    </div>
+  }
+
+</div>
+
+}
+
+<!-- ── Sprint dialog ──────────────────────────────────────────────────────────── -->
+@if (showSprintDialog()) {
+  <div class="dialog-backdrop" (click)="closeSprintDialog()">
+    <div class="dialog" (click)="$event.stopPropagation()">
+      <div class="dialog__header">
+        <h2 class="dialog__title">New sprint</h2>
+        <button class="dialog__close" (click)="closeSprintDialog()"><tui-icon icon="@tui.x" /></button>
+      </div>
+      <form [formGroup]="sprintForm" (ngSubmit)="submitSprint()" class="dialog__form">
+        <div class="form-field">
+          <label class="form-label">Name *</label>
+          <input class="form-input" formControlName="name" placeholder="Sprint 1" />
+        </div>
+        <div class="form-field">
+          <label class="form-label">Goal</label>
+          <input class="form-input" formControlName="goal" placeholder="Sprint goal…" />
+        </div>
+        <div class="form-row">
+          <div class="form-field">
+            <label class="form-label">Start date</label>
+            <input class="form-input" type="date" formControlName="start_date" />
+          </div>
+          <div class="form-field">
+            <label class="form-label">End date</label>
+            <input class="form-input" type="date" formControlName="end_date" />
+          </div>
+        </div>
+        @if (sprintError()) { <p class="form-error">{{ sprintError() }}</p> }
+        <div class="dialog__actions">
+          <button type="button" class="btn-secondary" (click)="closeSprintDialog()">Cancel</button>
+          <button type="submit" class="btn-primary" [disabled]="sprintForm.invalid || sprintSaving()">
+            {{ sprintSaving() ? 'Creating…' : 'Create sprint' }}
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+}
+
+<!-- ── Sprint complete dialog ─────────────────────────────────────────────────── -->
+@if (completingSprint()) {
+  <div class="dialog-backdrop" (click)="closeCompleteDialog()">
+    <div class="dialog" (click)="$event.stopPropagation()">
+      <div class="dialog__header">
+        <h2 class="dialog__title">Complete "{{ completingSprint()!.name }}"</h2>
+        <button class="dialog__close" (click)="closeCompleteDialog()"><tui-icon icon="@tui.x" /></button>
+      </div>
+      <div class="dialog__form">
+        <p class="pd-muted">What should happen to incomplete tasks?</p>
+        <div class="radio-group">
+          <label class="radio-row">
+            <input type="radio" name="action" value="backlog"
+              [checked]="incompleteAction() === 'backlog'"
+              (change)="incompleteAction.set('backlog')" />
+            Move to backlog
+          </label>
+          <label class="radio-row">
+            <input type="radio" name="action" value="next_sprint"
+              [checked]="incompleteAction() === 'next_sprint'"
+              (change)="incompleteAction.set('next_sprint')" />
+            Move to next sprint
+          </label>
+        </div>
+        @if (incompleteAction() === 'next_sprint') {
+          <div class="form-field" style="margin-top:12px">
+            <label class="form-label">Next sprint</label>
+            <select class="form-input" [value]="nextSprintId()" (change)="nextSprintId.set($any($event.target).value)">
+              <option value="">— select —</option>
+              @for (s of plannedSprints(); track s.id) {
+                <option [value]="s.id">{{ s.name }}</option>
+              }
+            </select>
+          </div>
+        }
+        @if (completeError()) { <p class="form-error">{{ completeError() }}</p> }
+        <div class="dialog__actions">
+          <button class="btn-secondary" (click)="closeCompleteDialog()">Cancel</button>
+          <button class="btn-primary" (click)="submitComplete()" [disabled]="completeSaving()">
+            {{ completeSaving() ? 'Completing…' : 'Complete sprint' }}
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+}
+
+<!-- ── Add member dialog ──────────────────────────────────────────────────────── -->
+@if (showMemberDialog()) {
+  <div class="dialog-backdrop" (click)="closeMemberDialog()">
+    <div class="dialog" (click)="$event.stopPropagation()">
+      <div class="dialog__header">
+        <h2 class="dialog__title">Add member</h2>
+        <button class="dialog__close" (click)="closeMemberDialog()"><tui-icon icon="@tui.x" /></button>
+      </div>
+      <form [formGroup]="memberForm" (ngSubmit)="submitMember()" class="dialog__form">
+        <div class="form-field">
+          <label class="form-label">User ID *</label>
+          <input class="form-input" formControlName="user_id" placeholder="UUID of the user" />
+        </div>
+        <div class="form-field">
+          <label class="form-label">Role</label>
+          <select class="form-input" formControlName="role">
+            @for (r of projectRoles; track r) {
+              <option [value]="r">{{ roleLabel(r) }}</option>
+            }
+          </select>
+        </div>
+        @if (memberError()) { <p class="form-error">{{ memberError() }}</p> }
+        <div class="dialog__actions">
+          <button type="button" class="btn-secondary" (click)="closeMemberDialog()">Cancel</button>
+          <button type="submit" class="btn-primary" [disabled]="memberForm.invalid || memberSaving()">
+            {{ memberSaving() ? 'Adding…' : 'Add member' }}
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+}
+
+<!-- ── Label dialog ───────────────────────────────────────────────────────────── -->
+@if (showLabelDialog()) {
+  <div class="dialog-backdrop" (click)="closeLabelDialog()">
+    <div class="dialog" (click)="$event.stopPropagation()">
+      <div class="dialog__header">
+        <h2 class="dialog__title">{{ editingLabel() ? 'Edit label' : 'New label' }}</h2>
+        <button class="dialog__close" (click)="closeLabelDialog()"><tui-icon icon="@tui.x" /></button>
+      </div>
+      <form [formGroup]="labelForm" (ngSubmit)="submitLabel()" class="dialog__form">
+        <div class="form-field">
+          <label class="form-label">Name *</label>
+          <input class="form-input" formControlName="name" placeholder="Bug, Feature…" />
+        </div>
+        <div class="form-field">
+          <label class="form-label">Color</label>
+          <div class="color-picker">
+            @for (c of labelColors; track c) {
+              <button
+                type="button"
+                class="color-swatch"
+                [class.color-swatch--active]="labelForm.controls.color.value === c"
+                [style.background]="c"
+                (click)="selectLabelColor(c)"
+              ></button>
+            }
+          </div>
+        </div>
+        @if (labelError()) { <p class="form-error">{{ labelError() }}</p> }
+        <div class="dialog__actions">
+          <button type="button" class="btn-secondary" (click)="closeLabelDialog()">Cancel</button>
+          <button type="submit" class="btn-primary" [disabled]="labelForm.invalid || labelSaving()">
+            {{ labelSaving() ? 'Saving…' : 'Save' }}
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+}
+
+<!-- ── Custom field dialog ────────────────────────────────────────────────────── -->
+@if (showFieldDialog()) {
+  <div class="dialog-backdrop" (click)="closeFieldDialog()">
+    <div class="dialog" (click)="$event.stopPropagation()">
+      <div class="dialog__header">
+        <h2 class="dialog__title">New custom field</h2>
+        <button class="dialog__close" (click)="closeFieldDialog()"><tui-icon icon="@tui.x" /></button>
+      </div>
+      <form [formGroup]="fieldForm" (ngSubmit)="submitField()" class="dialog__form">
+        <div class="form-field">
+          <label class="form-label">Name *</label>
+          <input class="form-input" formControlName="name" placeholder="Story points…" />
+        </div>
+        <div class="form-field">
+          <label class="form-label">Type</label>
+          <select class="form-input" formControlName="field_type">
+            @for (t of fieldTypes; track t) {
+              <option [value]="t">{{ t }}</option>
+            }
+          </select>
+        </div>
+        <label class="form-checkbox">
+          <input type="checkbox" formControlName="is_required" /> Required
+        </label>
+        @if (fieldError()) { <p class="form-error">{{ fieldError() }}</p> }
+        <div class="dialog__actions">
+          <button type="button" class="btn-secondary" (click)="closeFieldDialog()">Cancel</button>
+          <button type="submit" class="btn-primary" [disabled]="fieldForm.invalid || fieldSaving()">
+            {{ fieldSaving() ? 'Creating…' : 'Create field' }}
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+}

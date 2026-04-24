@@ -18,7 +18,7 @@
         }
       </p>
     </div>
-    <a class="btn btn--primary" routerLink="/task/new">+ New Task</a>
+    <a class="btn btn--primary" routerLink="/task/new"><tui-icon icon="@tui.plus" /> New Task</a>
   </header>
 
   <!-- Stats row -->
@@ -112,14 +112,14 @@
         </div>
         <div class="project-cards">
           @for (project of projects(); track project.id) {
-            <div class="project-card">
+            <a class="project-card" [routerLink]="['/projects', project.id]">
               <div class="project-card__row">
                 <div class="project-card__info">
                   <div class="project-dot" [style.background]="project.color"></div>
                   <span class="project-name">{{ project.name }}</span>
                 </div>
               </div>
-            </div>
+            </a>
           }
         </div>
       </section>
