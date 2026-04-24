@@ -854,6 +854,15 @@ class TaskCustomFieldValueDetailView(APIView):
         value_obj = TaskCustomFieldValue.objects.select_related("custom_field").get(pk=value_obj.pk)
         return Response(TaskCustomFieldValueSerializer(value_obj).data)
 
+    def delete(self, request, pk, field_id):
+        task = get_object_or_404(Task, pk=pk, deleted_at__isnull=True)
+        if not AccessControlService.can_edit_task(request.user, task):
+            return Response({"detail": "Insufficient permissions."}, status=403)
+        from tasks.models import CustomField, TaskCustomFieldValue
+        field = get_object_or_404(CustomField, pk=field_id, project=task.project)
+        TaskCustomFieldValue.objects.filter(task=task, custom_field=field).delete()
+        return Response(status=204)
+
 
 # ---------------------------------------------------------------------------
 # Reaction views
