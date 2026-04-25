@@ -1,0 +1,53 @@
+<div class="auth-page">
+  <div class="card">
+
+    <div class="brand">
+      <div class="brand-mark">D</div>
+      <span class="brand-name">Dodoist</span>
+    </div>
+
+    @if (state() === 'verifying') {
+      <h1 class="card__title">Verifying…</h1>
+      <p class="card__sub">Checking your verification link.</p>
+    }
+
+    @if (state() === 'waiting') {
+      <div class="icon-wrap icon-wrap--info">✉️</div>
+      <h1 class="card__title">Check your email</h1>
+      <p class="card__sub">
+        We sent a verification link to your email address.
+        Click it to activate your account.
+      </p>
+      @if (!resendDone()) {
+        <button class="btn-secondary" (click)="resend()" [disabled]="resending()">
+          {{ resending() ? 'Sending…' : 'Resend verification email' }}
+        </button>
+      } @else {
+        <p class="success-msg">Email sent! Check your inbox.</p>
+      }
+    }
+
+    @if (state() === 'success') {
+      <div class="icon-wrap icon-wrap--success">✓</div>
+      <h1 class="card__title">Email verified!</h1>
+      <p class="card__sub">Your account is now active. You can log in.</p>
+      <a class="btn-primary" routerLink="/login">Go to login</a>
+    }
+
+    @if (state() === 'error') {
+      <div class="icon-wrap icon-wrap--error">✕</div>
+      <h1 class="card__title">Verification failed</h1>
+      <p class="error-msg">{{ message() }}</p>
+      @if (!resendDone()) {
+        <button class="btn-secondary" (click)="resend()" [disabled]="resending()">
+          {{ resending() ? 'Sending…' : 'Resend verification email' }}
+        </button>
+      } @else {
+        <p class="success-msg">Email sent! Check your inbox.</p>
+      }
+    }
+
+    <a class="back-link" routerLink="/login">← Back to login</a>
+
+  </div>
+</div>

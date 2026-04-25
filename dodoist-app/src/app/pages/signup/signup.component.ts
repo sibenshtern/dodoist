@@ -54,7 +54,7 @@ export class SignupComponent {
 
     this.authService.register(email, password, name, timezone).subscribe({
       next: () => {
-        this.router.navigate(['/home']);
+        this.router.navigate(['/verify-email']);
       },
       error: (err) => {
         const message = err.error?.detail ?? 'Registration failed. Please try again.';

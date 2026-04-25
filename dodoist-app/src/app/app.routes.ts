@@ -26,6 +26,21 @@ export const routes: Routes = [
     loadComponent: () =>
       import('./pages/docs/docs.component').then(m => m.DocsComponent),
   },
+  {
+    path: 'verify-email',
+    loadComponent: () =>
+      import('./pages/verify-email/verify-email.component').then(m => m.VerifyEmailComponent),
+  },
+  {
+    path: 'forgot-password',
+    loadComponent: () =>
+      import('./pages/forgot-password/forgot-password.component').then(m => m.ForgotPasswordComponent),
+  },
+  {
+    path: 'reset-password',
+    loadComponent: () =>
+      import('./pages/reset-password/reset-password.component').then(m => m.ResetPasswordComponent),
+  },
   // ── Dashboard shell — all authenticated pages live here ──────────────────
   {
     path: '',

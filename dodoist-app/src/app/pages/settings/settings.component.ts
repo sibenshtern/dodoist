@@ -1,20 +1,37 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
+import { SlicePipe } from '@angular/common';
 import { TuiIcon } from '@taiga-ui/core';
 import { UserService, UserPreferences } from '../../services/user.service';
+import { HttpClient } from '@angular/common/http';
+import { environment } from '../../../environments/environment';
+
+export interface UserSession {
+  id: string;
+  device_info: string;
+  ip_address: string | null;
+  created_at: string;
+  expires_at: string;
+  is_current: boolean;
+}
 
 type Tab = 'profile' | 'preferences' | 'security';
 
 @Component({
   selector: 'app-settings',
   standalone: true,
-  imports: [TuiIcon, ReactiveFormsModule],
+  imports: [TuiIcon, ReactiveFormsModule, SlicePipe],
   templateUrl: './settings.component.html',
   styleUrl: './settings.component.scss',
 })
 export class SettingsComponent implements OnInit {
   private readonly fb = inject(FormBuilder);
+  private readonly http = inject(HttpClient);
   readonly userService = inject(UserService);
+
+  readonly sessions = signal<UserSession[]>([]);
+  readonly sessionsLoading = signal(false);
+  readonly revokeAllSaving = signal(false);
 
   readonly activeTab = signal<Tab>('profile');
 
@@ -82,6 +99,42 @@ export class SettingsComponent implements OnInit {
 
   setTab(tab: Tab): void {
     this.activeTab.set(tab);
+    if (tab === 'security') this.loadSessions();
+  }
+
+  private loadSessions(): void {
+    const user = this.userService.currentUser();
+    if (!user) return;
+    this.sessionsLoading.set(true);
+    this.http.get<UserSession[]>(`${environment.apiBase}/api/users/${user.id}/sessions/`)
+      .subscribe({
+        next: s => { this.sessions.set(s); this.sessionsLoading.set(false); },
+        error: () => this.sessionsLoading.set(false),
+      });
+  }
+
+  revokeSession(session: UserSession): void {
+    const user = this.userService.currentUser();
+    if (!user) return;
+    this.http.delete(`${environment.apiBase}/api/users/${user.id}/sessions/${session.id}/`)
+      .subscribe({
+        next: () => this.sessions.update(list => list.filter(s => s.id !== session.id)),
+        error: err => alert(err?.error?.detail ?? 'Failed to revoke session.'),
+      });
+  }
+
+  revokeAllOtherSessions(): void {
+    const user = this.userService.currentUser();
+    if (!user || this.revokeAllSaving()) return;
+    this.revokeAllSaving.set(true);
+    this.http.delete<{ revoked: number }>(`${environment.apiBase}/api/users/${user.id}/sessions/`)
+      .subscribe({
+        next: () => {
+          this.revokeAllSaving.set(false);
+          this.loadSessions();
+        },
+        error: () => this.revokeAllSaving.set(false),
+      });
   }
 
   saveProfile(): void {

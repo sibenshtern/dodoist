@@ -1,5 +1,5 @@
 import { computed, inject, Injectable, signal } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Router } from '@angular/router';
 import { Observable, tap, catchError, EMPTY, retry } from 'rxjs';
 import { environment } from '../../environments/environment';
@@ -89,5 +89,41 @@ export class AuthService {
 
   clearToken(): void {
     this.accessToken.set(null);
+  }
+
+  verifyEmail(token: string): Observable<{ detail: string; email: string }> {
+    return this.http.post<{ detail: string; email: string }>(
+      `${environment.apiBase}/api/auth/verify-email`,
+      {},
+      { headers: new HttpHeaders({ 'X-Verification-Token': token }) },
+    );
+  }
+
+  resendVerification(): Observable<{ detail: string }> {
+    return this.http.post<{ detail: string }>(
+      `${environment.apiBase}/api/auth/resend-verification`,
+      {},
+      { withCredentials: true },
+    );
+  }
+
+  forgotPassword(email: string): Observable<{ detail: string }> {
+    return this.http.post<{ detail: string }>(
+      `${environment.apiBase}/api/auth/forgot-password`,
+      { email },
+    );
+  }
+
+  resetPassword(token: string, newPassword: string): Observable<{ detail: string }> {
+    return this.http.post<{ detail: string }>(
+      `${environment.apiBase}/api/auth/reset-password`,
+      {},
+      {
+        headers: new HttpHeaders({
+          'X-Reset-Token': token,
+          'X-New-Password': newPassword,
+        }),
+      },
+    );
   }
 }

@@ -1,0 +1,135 @@
+$red:    #db4035;
+$dark:   #1a1814;
+$gray:   #8a8680;
+$border: #e8e6e1;
+$white:  #ffffff;
+$bg:     #f7f6f3;
+$font-h: 'Lora', Georgia, serif;
+$font-b: 'Manrope', sans-serif;
+
+:host { display: block; font-family: $font-b; -webkit-font-smoothing: antialiased; }
+
+.auth-page {
+  min-height: 100vh;
+  background: $bg;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 16px;
+}
+
+.card {
+  background: $white;
+  border: 1.111px solid $border;
+  border-radius: 16px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+  width: 420px;
+  padding: 40px;
+  text-align: center;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 28px;
+}
+
+.brand-mark {
+  width: 32px;
+  height: 32px;
+  background: $red;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: $font-h;
+  font-size: 16px;
+  font-weight: 700;
+  color: $white;
+}
+
+.brand-name {
+  font-family: $font-h;
+  font-size: 20px;
+  font-weight: 600;
+  color: $dark;
+}
+
+.card__title {
+  font-family: $font-h;
+  font-size: 22px;
+  font-weight: 600;
+  color: $dark;
+  margin: 0 0 8px;
+}
+
+.card__sub {
+  color: $gray;
+  font-size: 14px;
+  margin: 0 0 24px;
+  line-height: 1.5;
+}
+
+.icon-wrap {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  font-size: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 20px;
+
+  &--success { background: #dcfce7; color: #16a34a; }
+  &--error   { background: #fee2e2; color: #dc2626; }
+  &--info    { background: #eff6ff; font-size: 28px; }
+}
+
+.btn-primary {
+  display: block;
+  text-align: center;
+  text-decoration: none;
+  width: 100%;
+  padding: 11px;
+  background: $red;
+  color: $white;
+  border: none;
+  border-radius: 8px;
+  font-family: $font-b;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.12s;
+  &:hover { opacity: 0.9; }
+}
+
+.btn-secondary {
+  display: block;
+  width: 100%;
+  padding: 10px;
+  background: none;
+  border: 1.111px solid $border;
+  border-radius: 8px;
+  font-family: $font-b;
+  font-size: 14px;
+  font-weight: 500;
+  color: $gray;
+  cursor: pointer;
+  transition: all 0.12s;
+  &:hover { border-color: #ccc9c4; color: $dark; }
+  &:disabled { opacity: 0.5; cursor: not-allowed; }
+}
+
+.success-msg { color: #16a34a; font-size: 13px; margin: 0; }
+.error-msg   { color: #dc2626; font-size: 13.5px; margin: 0 0 16px; }
+
+.back-link {
+  display: block;
+  margin-top: 24px;
+  font-size: 13px;
+  color: $gray;
+  text-decoration: none;
+  &:hover { color: $dark; }
+}

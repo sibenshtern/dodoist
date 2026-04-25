@@ -151,6 +151,86 @@ $font-h:     'Lora', Georgia, serif;
   padding-top: 4px;
 }
 
+.settings-divider {
+  border: none;
+  border-top: 1px solid $border;
+  margin: 24px 0;
+}
+
+.sessions-loading, .sessions-empty { font-size: 13px; color: $gray; margin: 0; }
+
+.sessions-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.session-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border: 1.111px solid $border;
+  border-radius: 8px;
+  background: $bg-surface;
+  &--current { border-color: #a3c4ff; background: #eff6ff; }
+}
+
+.session-item__info { display: flex; flex-direction: column; gap: 2px; }
+
+.session-item__device {
+  font-size: 13px;
+  font-weight: 600;
+  color: $dark;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.session-item__meta { font-size: 11.5px; color: $gray; }
+
+.session-badge {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.btn-revoke {
+  padding: 4px 10px;
+  background: none;
+  border: 1.111px solid $border;
+  border-radius: 5px;
+  font-family: $font-b;
+  font-size: 12px;
+  color: $gray;
+  cursor: pointer;
+  transition: all 0.12s;
+  &:hover { border-color: $red; color: $red; }
+}
+
+.btn-revoke-all {
+  padding: 8px 14px;
+  background: none;
+  border: 1.111px solid $red;
+  border-radius: 7px;
+  font-family: $font-b;
+  font-size: 13px;
+  font-weight: 600;
+  color: $red;
+  cursor: pointer;
+  transition: all 0.12s;
+  &:hover { background: #fff0ef; }
+  &:disabled { opacity: 0.5; cursor: not-allowed; }
+}
+
 .btn-primary {
   padding: 9px 18px;
   background: $red;

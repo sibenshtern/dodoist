@@ -135,6 +135,39 @@
             @if (pwSaved()) { <span class="form-saved">Password updated!</span> }
           </div>
         </form>
+
+        <hr class="settings-divider" />
+
+        <h2 class="settings-panel__title">Active sessions</h2>
+        @if (sessionsLoading()) {
+          <p class="sessions-loading">Loading sessions…</p>
+        } @else if (sessions().length === 0) {
+          <p class="sessions-empty">No active sessions found.</p>
+        } @else {
+          <ul class="sessions-list">
+            @for (s of sessions(); track s.id) {
+              <li class="session-item" [class.session-item--current]="s.is_current">
+                <div class="session-item__info">
+                  <span class="session-item__device">
+                    {{ s.device_info || 'Unknown device' }}
+                    @if (s.is_current) { <span class="session-badge">Current</span> }
+                  </span>
+                  <span class="session-item__meta">
+                    {{ s.ip_address || 'Unknown IP' }} · {{ s.created_at | slice:0:10 }}
+                  </span>
+                </div>
+                @if (!s.is_current) {
+                  <button class="btn-revoke" (click)="revokeSession(s)">Revoke</button>
+                }
+              </li>
+            }
+          </ul>
+          @if (sessions().length > 1) {
+            <button class="btn-revoke-all" (click)="revokeAllOtherSessions()" [disabled]="revokeAllSaving()">
+              {{ revokeAllSaving() ? 'Revoking…' : 'Revoke all other sessions' }}
+            </button>
+          }
+        }
       </section>
     }
 
