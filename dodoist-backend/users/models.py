@@ -23,6 +23,10 @@ class User(AbstractBaseUser):
         max_length=10, choices=GlobalRole.choices, default=GlobalRole.MEMBER
     )
     is_active = models.BooleanField(default=True)
+    email_verified = models.BooleanField(default=False)
+    verification_token_hash = models.CharField(max_length=255, blank=True, default="")
+    password_reset_token_hash = models.CharField(max_length=255, blank=True, default="")
+    password_reset_expires_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(default=tz.now)
     updated_at = models.DateTimeField(auto_now=True)
     # last_login is inherited from AbstractBaseUser (maps to last_login_at in schema)

@@ -40,6 +40,11 @@ class RegisterView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
+        from users.throttling import RegisterRateThrottle
+        throttle = RegisterRateThrottle()
+        if not throttle.allow_request(request, self):
+            return Response({"detail": "Too many registrations. Try again later."}, status=429)
+
         serializer = RegisterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
@@ -53,6 +58,8 @@ class RegisterView(APIView):
             )
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=400)
+
+        UserService.send_verification_email(user)
 
         access_token, raw_refresh, _session = _create_session_for_user(user, request)
         UserService.record_login(user)
@@ -418,3 +425,129 @@ class NotificationReadAllView(APIView):
             is_read=True, read_at=now
         )
         return Response({"marked_count": count})
+
+
+# ---------------------------------------------------------------------------
+# Email verification
+# ---------------------------------------------------------------------------
+
+class VerifyEmailView(APIView):
+    """POST /api/auth/verify-email   header: X-Verification-Token"""
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        token = request.headers.get("X-Verification-Token", "").strip()
+        if not token:
+            return Response({"detail": "X-Verification-Token header is required."}, status=400)
+        try:
+            user = UserService.verify_email(token)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=400)
+        return Response({"detail": "Email verified.", "email": user.email})
+
+
+class ResendVerificationView(APIView):
+    """POST /api/auth/resend-verification   (authenticated)"""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if request.user.email_verified:
+            return Response({"detail": "Email is already verified."}, status=400)
+        UserService.send_verification_email(request.user)
+        return Response({"detail": "Verification email sent."})
+
+
+# ---------------------------------------------------------------------------
+# Password reset
+# ---------------------------------------------------------------------------
+
+class ForgotPasswordView(APIView):
+    """POST /api/auth/forgot-password   body: {email}"""
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    throttle_classes = []  # throttling applied per scope in settings
+
+    def post(self, request):
+        from users.throttling import ForgotPasswordRateThrottle
+        throttle = ForgotPasswordRateThrottle()
+        if not throttle.allow_request(request, self):
+            return Response({"detail": "Too many requests. Try again later."}, status=429)
+        email = request.data.get("email", "").strip().lower()
+        if not email:
+            return Response({"detail": "email is required."}, status=400)
+        UserService.send_password_reset_email(email)
+        return Response({"detail": "If that email exists, a reset link has been sent."})
+
+
+class ResetPasswordView(APIView):
+    """POST /api/auth/reset-password   header: X-Reset-Token + X-New-Password"""
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        token = request.headers.get("X-Reset-Token", "").strip()
+        new_password = request.headers.get("X-New-Password", "").strip()
+        if not token or not new_password:
+            return Response(
+                {"detail": "X-Reset-Token and X-New-Password headers are required."},
+                status=400,
+            )
+        if len(new_password) < 8:
+            return Response({"detail": "New password must be at least 8 characters."}, status=400)
+        try:
+            UserService.reset_password(token, new_password)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=400)
+        return Response({"detail": "Password reset successfully. Please log in."})
+
+
+# ---------------------------------------------------------------------------
+# Session management
+# ---------------------------------------------------------------------------
+
+class UserSessionListView(APIView):
+    """GET /api/users/<pk>/sessions/   DELETE /api/users/<pk>/sessions/ (revoke all others)"""
+
+    def _check_owner(self, request, pk):
+        if str(request.user.pk) != str(pk) and not request.user.has_elevated_access():
+            return Response({"detail": "Forbidden."}, status=403)
+        return None
+
+    def get(self, request, pk):
+        err = self._check_owner(request, pk)
+        if err:
+            return err
+        sessions = UserSession.objects.filter(user_id=pk).order_by("-created_at")
+        current_hash = request.auth.token_hash if request.auth else None
+        data = [
+            {
+                "id": str(s.pk),
+                "device_info": s.device_info,
+                "ip_address": s.ip_address,
+                "created_at": s.created_at.isoformat(),
+                "expires_at": s.expires_at.isoformat(),
+                "is_current": s.token_hash == current_hash,
+            }
+            for s in sessions
+        ]
+        return Response(data)
+
+    def delete(self, request, pk):
+        err = self._check_owner(request, pk)
+        if err:
+            return err
+        current = request.auth
+        deleted, _ = UserSession.objects.filter(user_id=pk).exclude(pk=current.pk).delete()
+        return Response({"revoked": deleted})
+
+
+class UserSessionDetailView(APIView):
+    """DELETE /api/users/<pk>/sessions/<session_id>/"""
+
+    def delete(self, request, pk, session_id):
+        if str(request.user.pk) != str(pk) and not request.user.has_elevated_access():
+            return Response({"detail": "Forbidden."}, status=403)
+        session = get_object_or_404(UserSession, pk=session_id, user_id=pk)
+        session.delete()
+        return Response(status=204)

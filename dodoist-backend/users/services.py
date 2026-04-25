@@ -1,3 +1,5 @@
+import hashlib
+import secrets
 import uuid
 
 from django.db import transaction
@@ -178,3 +180,61 @@ class UserService:
     def cleanup_expired_sessions() -> int:
         deleted, _ = UserSession.objects.filter(expires_at__lt=timezone.now()).delete()
         return deleted
+
+    # ── Email verification ────────────────────────────────────────────────────
+
+    @staticmethod
+    def send_verification_email(user: User) -> None:
+        token = secrets.token_urlsafe(32)
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
+        user.verification_token_hash = token_hash
+        user.save(update_fields=["verification_token_hash"])
+        from users.tasks import send_verification_email as task
+        task.delay(str(user.pk), token)
+
+    @staticmethod
+    def verify_email(token: str) -> User:
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
+        try:
+            user = User.objects.get(verification_token_hash=token_hash, is_active=True)
+        except User.DoesNotExist:
+            raise ValueError("Invalid or expired verification token.")
+        user.email_verified = True
+        user.verification_token_hash = ""
+        user.save(update_fields=["email_verified", "verification_token_hash", "updated_at"])
+        return user
+
+    # ── Password reset ────────────────────────────────────────────────────────
+
+    @staticmethod
+    def send_password_reset_email(email: str) -> None:
+        try:
+            user = User.objects.get(email=email, is_active=True)
+        except User.DoesNotExist:
+            return  # silent — don't reveal whether email exists
+        token = secrets.token_urlsafe(32)
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
+        user.password_reset_token_hash = token_hash
+        user.password_reset_expires_at = timezone.now() + timezone.timedelta(hours=1)
+        user.save(update_fields=["password_reset_token_hash", "password_reset_expires_at"])
+        from users.tasks import send_password_reset_email as task
+        task.delay(str(user.pk), token)
+
+    @staticmethod
+    @transaction.atomic
+    def reset_password(token: str, new_password: str) -> User:
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
+        try:
+            user = User.objects.get(password_reset_token_hash=token_hash, is_active=True)
+        except User.DoesNotExist:
+            raise ValueError("Invalid or expired reset token.")
+        if not user.password_reset_expires_at or timezone.now() > user.password_reset_expires_at:
+            raise ValueError("Reset token has expired.")
+        user.set_password(new_password)
+        user.password_reset_token_hash = ""
+        user.password_reset_expires_at = None
+        user.save(update_fields=[
+            "password", "password_reset_token_hash", "password_reset_expires_at", "updated_at"
+        ])
+        user.sessions.all().delete()
+        return user

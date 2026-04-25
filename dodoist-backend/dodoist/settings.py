@@ -37,6 +37,15 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 50,
+    "DEFAULT_THROTTLE_CLASSES": [
+        "rest_framework.throttling.UserRateThrottle",
+    ],
+    "DEFAULT_THROTTLE_RATES": {
+        "user":             "1000/minute",
+        "login":            "5/minute",
+        "register":         "10/hour",
+        "forgot_password":  "5/hour",
+    },
 }
 
 MIDDLEWARE = [
@@ -96,15 +105,50 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:4200",
 ]
 CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_HEADERS = [
+    "accept",
+    "accept-encoding",
+    "authorization",
+    "content-type",
+    "dnt",
+    "origin",
+    "user-agent",
+    "x-csrftoken",
+    "x-requested-with",
+    # Custom auth headers
+    "x-verification-token",
+    "x-reset-token",
+    "x-new-password",
+    "x-current-password",
+]
 
-# Celery
-CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0")
-CELERY_RESULT_BACKEND = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0")
+# Email
+EMAIL_BACKEND = os.environ.get(
+    "EMAIL_BACKEND",
+    "django.core.mail.backends.console.EmailBackend",
+)
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "smtp.gmail.com")
+EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
+EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "true").lower() == "true"
+EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "Dodoist <noreply@dodoist.com>")
+FRONTEND_BASE_URL = os.environ.get("FRONTEND_BASE_URL", "http://localhost:4200")
+
+# Celery — use in-memory transport in dev so redis-py is not required
+_broker_default = "memory://" if DEBUG else "redis://localhost:6379/0"
+_result_default = "cache+memory://" if DEBUG else "redis://localhost:6379/0"
+CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", _broker_default)
+CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", _result_default)
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = "UTC"
-CELERY_TASK_ALWAYS_EAGER = os.environ.get("CELERY_ALWAYS_EAGER", "false").lower() == "true"
+# In dev (DEBUG=True) run tasks synchronously so no broker is needed.
+# Override with CELERY_ALWAYS_EAGER=false in .env when you want to test real async.
+_eager_default = "true" if DEBUG else "false"
+CELERY_TASK_ALWAYS_EAGER = os.environ.get("CELERY_ALWAYS_EAGER", _eager_default).lower() == "true"
+CELERY_TASK_EAGER_PROPAGATES = True  # raise task exceptions in eager mode
 
 LOGGING = {
     "version": 1,
