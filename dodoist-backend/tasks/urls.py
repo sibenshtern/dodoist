@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+    AttachmentDetailView,
     CommentDetailView,
     CommentReactionView,
     DashboardStatsView,
@@ -14,6 +15,7 @@ from .views import (
     TaskActivityView,
     TaskAssignmentDetailView,
     TaskAssignmentListView,
+    TaskAttachmentListCreateView,
     TaskCommentListView,
     TaskCustomFieldValueDetailView,
     TaskCustomFieldValueListView,
@@ -92,4 +94,8 @@ urlpatterns = [
     # Time logs
     path("api/tasks/<uuid:pk>/time-logs/", TaskTimeLogListView.as_view(), name="task-time-logs"),
     path("api/time-logs/<uuid:pk>/", TimeLogDetailView.as_view(), name="time-log-detail"),
+
+    # Attachments
+    path("api/tasks/<uuid:pk>/attachments/", TaskAttachmentListCreateView.as_view(), name="task-attachments"),
+    path("api/attachments/<uuid:pk>/", AttachmentDetailView.as_view(), name="attachment-detail"),
 ]

@@ -265,3 +265,26 @@ class TimeLog(models.Model):
 
     def __str__(self):
         return f"{self.logged_minutes}min by {self.user_id} on {self.logged_date}"
+
+
+# ---------------------------------------------------------------------------
+# Attachments
+# ---------------------------------------------------------------------------
+
+class Attachment(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name="attachments", null=True, blank=True)
+    comment = models.ForeignKey(Comment, on_delete=models.SET_NULL, related_name="attachments", null=True, blank=True)
+    uploaded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="attachments")
+    filename = models.CharField(max_length=255)
+    file_size_bytes = models.PositiveIntegerField()
+    mime_type = models.CharField(max_length=100)
+    storage_key = models.CharField(max_length=512)
+    created_at = models.DateTimeField(default=tz.now)
+
+    class Meta:
+        db_table = "attachments"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return self.filename

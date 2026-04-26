@@ -32,7 +32,7 @@ from .serializers import (
     TimeLogSerializer,
     TimeLogUpdateSerializer,
 )
-from .services import AccessControlService, CommentService, TaskService
+from .services import AccessControlService, AttachmentService, CommentService, TaskService
 
 _VALID_SORT_FIELDS = {"created_at", "due_date", "priority", "position"}
 
@@ -1148,3 +1148,69 @@ class MyTasksView(APIView):
             qs = qs.filter(status__in=[s.strip() for s in status_filter.split(",")])
 
         return Response(TaskSerializer(qs, many=True).data)
+
+
+# ---------------------------------------------------------------------------
+# Attachment views
+# ---------------------------------------------------------------------------
+
+class TaskAttachmentListCreateView(APIView):
+    """
+    GET  /api/tasks/<pk>/attachments/  — list task attachments
+    POST /api/tasks/<pk>/attachments/  — upload a file (multipart/form-data)
+    """
+
+    def get(self, request, pk):
+        from .models import Attachment
+        from .serializers import AttachmentSerializer
+        task = get_object_or_404(Task, pk=pk, deleted_at__isnull=True)
+        if not AccessControlService.can_view_task(request.user, task):
+            return Response({"detail": "Not found."}, status=404)
+        attachments = Attachment.objects.filter(task=task).select_related("uploaded_by")
+        return Response({"results": AttachmentSerializer(attachments, many=True, context={"request": request}).data})
+
+    def post(self, request, pk):
+        from .models import Comment
+        from .serializers import AttachmentSerializer
+        task = get_object_or_404(Task, pk=pk, deleted_at__isnull=True)
+        if not AccessControlService.can_edit_task(request.user, task):
+            return Response({"detail": "Forbidden."}, status=403)
+
+        uploaded_file = request.FILES.get("file")
+        if not uploaded_file:
+            return Response({"detail": "No file provided."}, status=400)
+
+        comment = None
+        if comment_id := request.data.get("comment_id"):
+            comment = get_object_or_404(Comment, pk=comment_id, task=task)
+
+        try:
+            attachment = AttachmentService.upload(task, uploaded_file, request.user, comment)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=400)
+
+        return Response(AttachmentSerializer(attachment, context={"request": request}).data, status=201)
+
+
+class AttachmentDetailView(APIView):
+    """DELETE /api/attachments/<pk>/"""
+
+    def delete(self, request, pk):
+        from .models import Attachment
+        attachment = get_object_or_404(Attachment, pk=pk)
+        user = request.user
+
+        is_uploader = attachment.uploaded_by_id == user.pk
+        is_elevated = user.has_elevated_access()
+        is_manager = False
+        if attachment.task:
+            membership = ProjectMember.objects.filter(
+                project=attachment.task.project, user=user
+            ).first()
+            is_manager = membership and membership.role in (ProjectRole.PO, ProjectRole.PM)
+
+        if not (is_uploader or is_elevated or is_manager):
+            return Response({"detail": "Forbidden."}, status=403)
+
+        AttachmentService.delete_attachment(attachment, request.user)
+        return Response(status=204)

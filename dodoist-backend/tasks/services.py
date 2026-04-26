@@ -1,3 +1,8 @@
+import os
+import re
+import uuid as _uuid
+
+from django.core.files.storage import default_storage
 from django.db import transaction
 from django.utils import timezone
 
@@ -7,6 +12,7 @@ from users.models import GlobalRole, NotificationType, User
 from .models import (
     ActivityEntityType,
     ActivityLog,
+    Attachment,
     Comment,
     CustomField,
     DependencyType,
@@ -305,3 +311,65 @@ class AccessControlService:
             return is_creator or is_assignee or is_co_assignee
 
         return False
+
+
+# ---------------------------------------------------------------------------
+# AttachmentService
+# ---------------------------------------------------------------------------
+
+class AttachmentService:
+    ALLOWED_MIME_TYPES = {
+        "image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml",
+        "application/pdf",
+        "text/plain", "text/csv",
+        "application/zip",
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.ms-excel",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.ms-powerpoint",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    }
+    MAX_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB
+
+    @staticmethod
+    @transaction.atomic
+    def upload(task: Task, uploaded_file, uploaded_by: User, comment: Comment | None = None) -> Attachment:
+        if uploaded_file.size > AttachmentService.MAX_SIZE_BYTES:
+            raise ValueError("File exceeds the 50 MB size limit.")
+
+        mime_type = (uploaded_file.content_type or "application/octet-stream").split(";")[0].strip()
+        if mime_type not in AttachmentService.ALLOWED_MIME_TYPES:
+            raise ValueError(f"File type '{mime_type}' is not allowed.")
+
+        # Store under attachments/{task_id}/{uuid}/{original_name} so the last
+        # path segment is the readable filename that browsers use when downloading.
+        safe_name = re.sub(r'[^\w.\-]', '_', uploaded_file.name)[:200] or "file"
+        storage_key = f"attachments/{task.pk}/{_uuid.uuid4()}/{safe_name}"
+        default_storage.save(storage_key, uploaded_file)
+
+        attachment = Attachment.objects.create(
+            task=task,
+            comment=comment,
+            uploaded_by=uploaded_by,
+            filename=uploaded_file.name,
+            file_size_bytes=uploaded_file.size,
+            mime_type=mime_type,
+            storage_key=storage_key,
+        )
+        _log(uploaded_by, task, "added_attachment", new={"filename": uploaded_file.name})
+        return attachment
+
+    @staticmethod
+    @transaction.atomic
+    def delete_attachment(attachment: Attachment, actor: User) -> None:
+        storage_key = attachment.storage_key
+        task = attachment.task
+        filename = attachment.filename
+        attachment.delete()
+        try:
+            default_storage.delete(storage_key)
+        except Exception:
+            pass
+        if task:
+            _log(actor, task, "removed_attachment", old={"filename": filename})

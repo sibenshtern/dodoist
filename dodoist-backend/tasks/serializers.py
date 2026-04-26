@@ -3,7 +3,7 @@ from rest_framework import serializers
 from projects.models import BoardColumn, Label, Project, ProjectStatus, Sprint, TaskStatus
 from users.models import User
 
-from .models import DependencyType, Task, TaskAssignment, TaskDependency, TaskGuestAccess, TaskLabel, TaskPriority, TaskType
+from .models import Attachment, DependencyType, Task, TaskAssignment, TaskDependency, TaskGuestAccess, TaskLabel, TaskPriority, TaskType
 from .services import TaskService
 
 
@@ -532,3 +532,24 @@ class ReactionSerializer(serializers.Serializer):
     emoji = serializers.CharField()
     user = UserBriefSerializer()
     created_at = serializers.DateTimeField()
+
+
+# ---------------------------------------------------------------------------
+# Attachment serializers
+# ---------------------------------------------------------------------------
+
+class AttachmentSerializer(serializers.ModelSerializer):
+    uploaded_by = UserBriefSerializer(read_only=True)
+    download_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Attachment
+        fields = ["id", "filename", "file_size_bytes", "mime_type", "download_url", "uploaded_by", "created_at"]
+
+    def get_download_url(self, obj):
+        from django.core.files.storage import default_storage
+        request = self.context.get("request")
+        url = default_storage.url(obj.storage_key)
+        if request:
+            return request.build_absolute_uri(url)
+        return url
