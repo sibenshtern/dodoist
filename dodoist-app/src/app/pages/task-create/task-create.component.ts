@@ -1,8 +1,9 @@
 import { Component, inject, signal, OnInit } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { RouterLink, Router } from '@angular/router';
-import { forkJoin, of, switchMap } from 'rxjs';
+import { forkJoin, map, of, switchMap } from 'rxjs';
 import { TaskService, TaskCreatePayload, Task } from '../../services/task.service';
+import { AttachmentsService } from '../../services/attachments.service';
 import { UserService } from '../../services/user.service';
 import { RichEditorComponent } from '../../components/rich-editor/rich-editor.component';
 
@@ -53,6 +54,7 @@ interface LabelOption {
 export class TaskCreateComponent implements OnInit {
   private readonly fb = inject(FormBuilder);
   private readonly taskService = inject(TaskService);
+  private readonly attachmentsService = inject(AttachmentsService);
   private readonly userService = inject(UserService);
   private readonly router = inject(Router);
 
@@ -97,6 +99,10 @@ export class TaskCreateComponent implements OnInit {
 
   readonly selectedLabelIds = signal<string[]>([]);
   readonly descriptionJson = signal<unknown>(null);
+  readonly pendingFiles = signal<File[]>([]);
+  readonly isDragging = signal(false);
+
+  readonly AttachmentsService = this.attachmentsService;
 
   readonly parentTaskSearch = signal('');
   readonly parentTaskResults = signal<Task[]>([]);
@@ -175,6 +181,27 @@ export class TaskCreateComponent implements OnInit {
     this.allProjectTasks = [];
   }
 
+  onFileDrop(event: DragEvent): void {
+    event.preventDefault();
+    this.isDragging.set(false);
+    const files = event.dataTransfer?.files;
+    if (files) this.addFiles(files);
+  }
+
+  onFileSelect(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    if (input.files) this.addFiles(input.files);
+    input.value = '';
+  }
+
+  addFiles(files: FileList): void {
+    this.pendingFiles.update((prev) => [...prev, ...Array.from(files)]);
+  }
+
+  removeFile(index: number): void {
+    this.pendingFiles.update((prev) => prev.filter((_, i) => i !== index));
+  }
+
   ngOnInit(): void {
     this.userService.loadWorkspaces().subscribe((workspaces) => {
       const ws = workspaces.find((w) => w.is_personal) ?? workspaces[0];
@@ -243,17 +270,18 @@ export class TaskCreateComponent implements OnInit {
       .createTask(payload)
       .pipe(
         switchMap((task) => {
-          const labelIds = this.selectedLabelIds();
-          if (labelIds.length === 0) return of({ taskId: task.id, labelsOk: true });
-          return forkJoin(labelIds.map((id) => this.taskService.addLabel(task.id, id))).pipe(
-            switchMap(() => of({ taskId: task.id, labelsOk: true })),
-          );
+          const ops = [
+            ...this.selectedLabelIds().map((id) => this.taskService.addLabel(task.id, id)),
+            ...this.pendingFiles().map((file) => this.attachmentsService.upload(task.id, file)),
+          ];
+          if (ops.length === 0) return of(task.id);
+          return forkJoin(ops).pipe(map(() => task.id));
         }),
       )
       .subscribe({
-        next: () => {
+        next: (taskId) => {
           this.isLoading.set(false);
-          this.router.navigate(['/home']);
+          this.router.navigate(['/task', taskId]);
         },
         error: (err) => {
           this.serverError.set(

@@ -58,6 +58,39 @@
           ></app-rich-editor>
         </div>
 
+        <!-- Attachments -->
+        <div class="field-block">
+          <label class="field-label">Attachments</label>
+          <div
+            class="attach-drop"
+            [class.attach-drop--active]="isDragging()"
+            (dragover)="$event.preventDefault(); isDragging.set(true)"
+            (dragleave)="isDragging.set(false)"
+            (drop)="onFileDrop($event)"
+          >
+            <span class="attach-drop__hint">Drop files here or</span>
+            <label class="attach-browse-btn">
+              Browse
+              <input type="file" multiple hidden (change)="onFileSelect($event)" />
+            </label>
+          </div>
+
+          @if (pendingFiles().length > 0) {
+            <ul class="attach-list">
+              @for (file of pendingFiles(); track file.name; let i = $index) {
+                <li class="attach-item">
+                  <span class="attach-item__icon">
+                    {{ AttachmentsService.isImage(file.type) ? '🖼' : '📄' }}
+                  </span>
+                  <span class="attach-item__name">{{ file.name }}</span>
+                  <span class="attach-item__size">{{ AttachmentsService.formatBytes(file.size) }}</span>
+                  <button type="button" class="attach-item__remove" (click)="removeFile(i)">✕</button>
+                </li>
+              }
+            </ul>
+          }
+        </div>
+
       </main>
 
       <!-- ── Properties sidebar ───────────────────────────────────────────── -->

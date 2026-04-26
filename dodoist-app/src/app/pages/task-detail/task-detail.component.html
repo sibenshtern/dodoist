@@ -146,6 +146,11 @@
           >Comments ({{ comments().length }})</button>
           <button
             class="tab-btn"
+            [class.tab-btn--active]="activeTab() === 'attachments'"
+            (click)="setTab('attachments')"
+          >Attachments ({{ attachments().length }})</button>
+          <button
+            class="tab-btn"
             [class.tab-btn--active]="activeTab() === 'time-logs'"
             (click)="setTab('time-logs')"
           >Time Logs</button>
@@ -198,6 +203,60 @@
               }
               @if (comments().length === 0) {
                 <p class="empty-hint">No comments yet.</p>
+              }
+            </div>
+          </div>
+        }
+
+        <!-- Tab: Attachments -->
+        @if (activeTab() === 'attachments') {
+          <div class="tab-panel">
+            <!-- Drop zone -->
+            <div
+              class="drop-zone"
+              [class.drop-zone--active]="isDragging()"
+              (dragover)="$event.preventDefault(); isDragging.set(true)"
+              (dragleave)="isDragging.set(false)"
+              (drop)="onFileDrop($event)"
+            >
+              <span class="drop-zone__text">
+                @if (isUploading()) { Uploading… }
+                @else { Drop a file here or }
+              </span>
+              @if (!isUploading()) {
+                <label class="btn btn--primary btn--sm drop-zone__btn">
+                  Browse
+                  <input type="file" hidden (change)="onFileSelect($event)" />
+                </label>
+              }
+            </div>
+
+            <!-- Attachment list -->
+            <div class="attachment-list">
+              @for (att of attachments(); track att.id) {
+                <div class="attachment-item">
+                  <div class="attachment-item__preview">
+                    @if (AttachmentsService.isImage(att.mime_type)) {
+                      <img class="attachment-thumb" [src]="att.download_url" [alt]="att.filename" />
+                    } @else {
+                      <div class="attachment-icon">{{ att.filename.split('.').pop()?.toUpperCase() }}</div>
+                    }
+                  </div>
+                  <div class="attachment-item__info">
+                    <a class="attachment-name" [href]="att.download_url" target="_blank" rel="noopener">{{ att.filename }}</a>
+                    <span class="attachment-meta">
+                      {{ AttachmentsService.formatBytes(att.file_size_bytes) }}
+                      · {{ att.uploaded_by.display_name }}
+                      · {{ att.created_at | date:'MMM d, y' }}
+                    </span>
+                  </div>
+                  @if (isOwnAttachment(att)) {
+                    <button class="action-link action-link--danger" (click)="deleteAttachment(att.id, att.filename)">✕</button>
+                  }
+                </div>
+              }
+              @if (attachments().length === 0 && !isUploading()) {
+                <p class="empty-hint">No attachments yet.</p>
               }
             </div>
           </div>

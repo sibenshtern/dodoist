@@ -9,11 +9,12 @@ import {
   TimeLog,
   ActivityLogEntry,
 } from '../../services/task.service';
+import { AttachmentsService, Attachment } from '../../services/attachments.service';
 import { ToastService } from '../../services/toast.service';
 import { UserService } from '../../services/user.service';
 import { RichEditorComponent } from '../../components/rich-editor/rich-editor.component';
 
-type ActiveTab = 'comments' | 'activity' | 'time-logs';
+type ActiveTab = 'comments' | 'activity' | 'time-logs' | 'attachments';
 
 const STATUS_META: Record<string, { label: string; color: string; bg: string }> = {
   backlog: { label: 'Backlog', color: '#8a8680', bg: '#f0eee9' },
@@ -43,6 +44,7 @@ export class TaskDetailComponent implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly taskService = inject(TaskService);
+  private readonly attachmentsService = inject(AttachmentsService);
   private readonly toast = inject(ToastService);
   private readonly userService = inject(UserService);
   private readonly fb = inject(FormBuilder);
@@ -51,9 +53,14 @@ export class TaskDetailComponent implements OnInit {
   readonly comments = signal<Comment[]>([]);
   readonly timeLogs = signal<TimeLog[]>([]);
   readonly activity = signal<ActivityLogEntry[]>([]);
+  readonly attachments = signal<Attachment[]>([]);
   readonly isLoading = signal(true);
   readonly activeTab = signal<ActiveTab>('comments');
   readonly totalMinutes = signal(0);
+  readonly isDragging = signal(false);
+  readonly isUploading = signal(false);
+
+  readonly AttachmentsService = this.attachmentsService;
 
   readonly STATUS_META = STATUS_META;
   readonly PRIORITY_META = PRIORITY_META;
@@ -104,6 +111,7 @@ export class TaskDetailComponent implements OnInit {
         this.descriptionDirty.set(false);
         this.isLoading.set(false);
         this.loadComments(id);
+        this.loadAttachments(id);
       },
       error: () => {
         this.isLoading.set(false);
@@ -143,6 +151,13 @@ export class TaskDetailComponent implements OnInit {
     if (!id) return;
     if (tab === 'time-logs' && this.timeLogs().length === 0) this.loadTimeLogs(id);
     if (tab === 'activity' && this.activity().length === 0) this.loadActivity(id);
+  }
+
+  loadAttachments(id: string): void {
+    this.attachmentsService.list(id).subscribe({
+      next: (list) => this.attachments.set(list),
+      error: () => this.toast.error('Failed to load attachments.'),
+    });
   }
 
   // ── Inline title edit ────────────────────────────────────────────────────
@@ -354,6 +369,51 @@ export class TaskDetailComponent implements OnInit {
     const h = Math.floor(minutes / 60);
     const m = minutes % 60;
     return h > 0 ? `${h}h ${m}m` : `${m}m`;
+  }
+
+  // ── Attachments ──────────────────────────────────────────────────────────
+
+  onFileDrop(event: DragEvent): void {
+    event.preventDefault();
+    this.isDragging.set(false);
+    const files = event.dataTransfer?.files;
+    if (files?.length) this.uploadFile(files[0]);
+  }
+
+  onFileSelect(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    if (input.files?.length) this.uploadFile(input.files[0]);
+    input.value = '';
+  }
+
+  uploadFile(file: File): void {
+    const task = this.task();
+    if (!task) return;
+    this.isUploading.set(true);
+    this.attachmentsService.upload(task.id, file).subscribe({
+      next: (attachment) => {
+        this.attachments.update((list) => [attachment, ...list]);
+        this.isUploading.set(false);
+        this.toast.success('File uploaded.');
+      },
+      error: (err) => {
+        const msg = err?.error?.detail ?? 'Upload failed.';
+        this.toast.error(msg);
+        this.isUploading.set(false);
+      },
+    });
+  }
+
+  deleteAttachment(id: string, filename: string): void {
+    if (!confirm(`Delete "${filename}"?`)) return;
+    this.attachmentsService.delete(id).subscribe({
+      next: () => this.attachments.update((list) => list.filter((a) => a.id !== id)),
+      error: () => this.toast.error('Failed to delete attachment.'),
+    });
+  }
+
+  isOwnAttachment(attachment: Attachment): boolean {
+    return attachment.uploaded_by.id === this.currentUserId();
   }
 
   // ── Reactions ────────────────────────────────────────────────────────────
