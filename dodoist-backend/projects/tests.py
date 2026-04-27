@@ -4,6 +4,7 @@ from rest_framework.test import APIClient
 from projects.models import (
     Board,
     BoardColumn,
+    Label,
     Project,
     ProjectMember,
     ProjectRole,
@@ -533,3 +534,261 @@ class TestWorkspaceMemberDetailView:
     def test_remove_nonexistent_user_returns_404(self, auth_client, workspace):
         response = auth_client.delete(self.url("00000000-0000-0000-0000-000000000000"))
         assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# API: Workspace project list/create
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+class TestProjectListCreateView:
+    def url(self, slug="acme"):
+        return f"/api/workspaces/{slug}/projects/"
+
+    def test_owner_can_list_projects(self, auth_client, workspace, user):
+        ProjectService.create_project(workspace=workspace, creator=user, name="Alpha", key="ALP")
+        response = auth_client.get(self.url())
+        assert response.status_code == 200
+        assert len(response.json()) >= 1
+
+    def test_owner_can_create_project(self, auth_client, workspace):
+        response = auth_client.post(
+            self.url(),
+            {"name": "Beta", "key": "BET", "type": "kanban"},
+            format="json",
+        )
+        assert response.status_code == 201
+        assert Project.objects.filter(key="BET").exists()
+
+    def test_non_member_cannot_list_projects(self, api_client, workspace, other_user):
+        api_client.force_authenticate(user=other_user)
+        response = api_client.get(self.url())
+        assert response.status_code in (403, 404)
+
+    def test_unauthenticated_returns_401(self, api_client, workspace):
+        response = api_client.get(self.url())
+        assert response.status_code == 401
+
+    def test_duplicate_key_returns_400(self, auth_client, workspace, user):
+        ProjectService.create_project(workspace=workspace, creator=user, name="Alpha", key="DUP")
+        response = auth_client.post(self.url(), {"name": "Other", "key": "DUP", "type": "kanban"}, format="json")
+        assert response.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# API: Project detail
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+class TestProjectDetailView:
+    @pytest.fixture
+    def project(self, workspace, user):
+        return ProjectService.create_project(workspace=workspace, creator=user, name="Alpha", key="ALP")
+
+    def test_member_can_get_project(self, auth_client, project):
+        response = auth_client.get(f"/api/projects/{project.pk}/")
+        assert response.status_code == 200
+        assert response.json()["key"] == "ALP"
+
+    def test_non_member_gets_404(self, api_client, project, other_user):
+        api_client.force_authenticate(user=other_user)
+        response = api_client.get(f"/api/projects/{project.pk}/")
+        assert response.status_code in (403, 404)
+
+    def test_owner_can_patch_name(self, auth_client, project):
+        response = auth_client.patch(f"/api/projects/{project.pk}/", {"name": "Alpha v2"}, format="json")
+        assert response.status_code == 200
+        project.refresh_from_db()
+        assert project.name == "Alpha v2"
+
+    def test_archive_project(self, auth_client, project):
+        response = auth_client.post(f"/api/projects/{project.pk}/archive/")
+        assert response.status_code == 200
+        project.refresh_from_db()
+        assert project.archived_at is not None
+
+    def test_unarchive_project(self, auth_client, project):
+        ProjectService.archive_project(project)
+        response = auth_client.post(f"/api/projects/{project.pk}/unarchive/")
+        assert response.status_code == 200
+        project.refresh_from_db()
+        assert project.archived_at is None
+
+
+# ---------------------------------------------------------------------------
+# API: Sprints
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+class TestSprintViews:
+    @pytest.fixture
+    def project(self, workspace, user):
+        return ProjectService.create_project(workspace=workspace, creator=user, name="Scrum", key="SCR", project_type="scrum")
+
+    @pytest.fixture
+    def sprint(self, project, user):
+        return SprintService.create_sprint(project=project, creator=user, name="S1")
+
+    def test_list_sprints(self, auth_client, project, sprint):
+        resp = auth_client.get(f"/api/projects/{project.pk}/sprints/")
+        assert resp.status_code == 200
+        assert len(resp.json()) == 1
+
+    def test_create_sprint(self, auth_client, project):
+        resp = auth_client.post(
+            f"/api/projects/{project.pk}/sprints/",
+            {"name": "New Sprint"},
+            format="json",
+        )
+        assert resp.status_code == 201
+        assert Sprint.objects.filter(name="New Sprint").exists()
+
+    def test_get_sprint_detail(self, auth_client, sprint):
+        resp = auth_client.get(f"/api/sprints/{sprint.pk}/")
+        assert resp.status_code == 200
+        assert resp.json()["name"] == "S1"
+
+    def test_start_sprint(self, auth_client, sprint):
+        resp = auth_client.post(f"/api/sprints/{sprint.pk}/start/")
+        assert resp.status_code == 200
+        sprint.refresh_from_db()
+        assert sprint.status == SprintStatus.ACTIVE
+
+    def test_cannot_start_already_active_sprint(self, auth_client, sprint):
+        SprintService.start_sprint(sprint)
+        resp = auth_client.post(f"/api/sprints/{sprint.pk}/start/")
+        assert resp.status_code in (400, 409)
+
+    def test_complete_sprint(self, auth_client, project, sprint):
+        SprintService.start_sprint(sprint)
+        resp = auth_client.post(
+            f"/api/sprints/{sprint.pk}/complete/",
+            {"incomplete_tasks_action": "backlog"},
+            format="json",
+        )
+        assert resp.status_code == 200
+        sprint.refresh_from_db()
+        assert sprint.status == SprintStatus.COMPLETED
+
+    def test_non_member_cannot_list_sprints(self, api_client, project, sprint, other_user):
+        api_client.force_authenticate(user=other_user)
+        resp = api_client.get(f"/api/projects/{project.pk}/sprints/")
+        assert resp.status_code in (403, 404)
+
+
+# ---------------------------------------------------------------------------
+# API: Board & columns
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+class TestBoardViews:
+    @pytest.fixture
+    def project(self, workspace, user):
+        return ProjectService.create_project(workspace=workspace, creator=user, name="Kanban", key="KAN", project_type="kanban")
+
+    def test_list_boards(self, auth_client, project):
+        resp = auth_client.get(f"/api/projects/{project.pk}/boards/")
+        assert resp.status_code == 200
+
+    def test_create_board(self, auth_client, project):
+        resp = auth_client.post(
+            f"/api/projects/{project.pk}/boards/",
+            {"name": "Sprint Board", "type": "kanban"},
+            format="json",
+        )
+        assert resp.status_code == 201
+        assert Board.objects.filter(name="Sprint Board").exists()
+
+    def test_get_board_detail(self, auth_client, project):
+        board = Board.objects.create(project=project, name="B1", type="kanban", is_default=False, created_by=auth_client.handler._force_user if hasattr(auth_client, 'handler') else project.created_by)
+        resp = auth_client.get(f"/api/boards/{board.pk}/")
+        assert resp.status_code == 200
+
+    def test_list_columns(self, auth_client, project, user):
+        board = Board.objects.create(project=project, name="B2", type="kanban", is_default=False, created_by=user)
+        resp = auth_client.get(f"/api/boards/{board.pk}/columns/")
+        assert resp.status_code == 200
+
+    def test_create_column(self, auth_client, project, user):
+        board = Board.objects.create(project=project, name="B3", type="kanban", is_default=False, created_by=user)
+        resp = auth_client.post(
+            f"/api/boards/{board.pk}/columns/",
+            {"name": "Review", "status_mapping": "in_review", "position": 3},
+            format="json",
+        )
+        assert resp.status_code == 201
+
+
+# ---------------------------------------------------------------------------
+# API: Labels
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+class TestLabelViews:
+    def url(self, slug="acme"):
+        return f"/api/workspaces/{slug}/labels/"
+
+    def test_list_labels_empty(self, auth_client, workspace):
+        resp = auth_client.get(self.url())
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_create_label(self, auth_client, workspace):
+        resp = auth_client.post(self.url(), {"name": "Bug", "color": "#ff0000"}, format="json")
+        assert resp.status_code == 201
+        assert resp.json()["name"] == "Bug"
+
+    def test_update_label(self, auth_client, workspace, user):
+        label = Label.objects.create(workspace=workspace, name="Feature", color="#00ff00", created_by=user)
+        resp = auth_client.patch(f"/api/workspaces/acme/labels/{label.pk}/", {"name": "Feature v2"}, format="json")
+        assert resp.status_code == 200
+        assert resp.json()["name"] == "Feature v2"
+
+    def test_delete_label(self, auth_client, workspace, user):
+        label = Label.objects.create(workspace=workspace, name="WontFix", color="#888888", created_by=user)
+        resp = auth_client.delete(f"/api/workspaces/acme/labels/{label.pk}/")
+        assert resp.status_code == 204
+        assert not Label.objects.filter(pk=label.pk).exists()
+
+    def test_non_member_cannot_create_label(self, api_client, workspace, other_user):
+        api_client.force_authenticate(user=other_user)
+        resp = api_client.post(self.url(), {"name": "Bad", "color": "#fff"}, format="json")
+        assert resp.status_code in (403, 404)
+
+
+# ---------------------------------------------------------------------------
+# API: Project members
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+class TestProjectMemberViews:
+    @pytest.fixture
+    def project(self, workspace, user):
+        return ProjectService.create_project(workspace=workspace, creator=user, name="Alpha", key="ALX")
+
+    def test_list_members(self, auth_client, project):
+        resp = auth_client.get(f"/api/projects/{project.pk}/members/")
+        assert resp.status_code == 200
+        assert len(resp.json()) >= 1
+
+    def test_add_member(self, auth_client, project, workspace, other_user):
+        WorkspaceService.add_member(workspace, other_user)
+        resp = auth_client.post(
+            f"/api/projects/{project.pk}/members/",
+            {"user_id": str(other_user.pk), "role": "DEV"},
+            format="json",
+        )
+        assert resp.status_code == 201
+        assert ProjectMember.objects.filter(project=project, user=other_user).exists()
+
+    def test_remove_member(self, auth_client, project, workspace, other_user, user):
+        WorkspaceService.add_member(workspace, other_user)
+        ProjectService.add_member(project, other_user, ProjectRole.DEV, added_by=user)
+        resp = auth_client.delete(f"/api/projects/{project.pk}/members/{other_user.pk}/")
+        assert resp.status_code == 204
+        assert not ProjectMember.objects.filter(project=project, user=other_user).exists()
+
+    def test_non_member_cannot_list(self, api_client, project, other_user):
+        api_client.force_authenticate(user=other_user)
+        resp = api_client.get(f"/api/projects/{project.pk}/members/")
+        assert resp.status_code in (403, 404)

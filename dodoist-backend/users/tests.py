@@ -464,3 +464,170 @@ class TestNotificationViews:
         resp = client.delete(f"/api/notifications/{n.pk}/")
         assert resp.status_code == 204
         assert not Notification.objects.filter(pk=n.pk).exists()
+
+
+# ---------------------------------------------------------------------------
+# API: Auth endpoints
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+class TestAuthRegisterView:
+    url = "/api/auth/register"
+
+    def test_register_creates_user(self, client):
+        from rest_framework.test import APIClient
+        c = APIClient()
+        resp = c.post(self.url, {"email": "new@example.com", "password": "pass1234", "display_name": "New"}, format="json")
+        assert resp.status_code == 201
+        assert User.objects.filter(email="new@example.com").exists()
+
+    def test_register_duplicate_email_returns_400(self, client):
+        from rest_framework.test import APIClient
+        c = APIClient()
+        UserService.register(email="dup@example.com", password="pass", display_name="D")
+        resp = c.post(self.url, {"email": "dup@example.com", "password": "pass", "display_name": "D2"}, format="json")
+        assert resp.status_code == 400
+
+    def test_register_missing_fields_returns_400(self, client):
+        from rest_framework.test import APIClient
+        c = APIClient()
+        resp = c.post(self.url, {"email": "x@x.com"}, format="json")
+        assert resp.status_code == 400
+
+
+@pytest.mark.django_db
+class TestAuthLoginView:
+    url = "/api/auth/login"
+
+    def test_login_valid_credentials_returns_token(self, user):
+        from rest_framework.test import APIClient
+        c = APIClient()
+        resp = c.post(self.url, {"email": "alice@example.com", "password": "strongpass123"}, format="json")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "access_token" in data
+        assert "user" in data
+
+    def test_login_wrong_password_returns_401(self, user):
+        from rest_framework.test import APIClient
+        c = APIClient()
+        resp = c.post(self.url, {"email": "alice@example.com", "password": "wrongpass"}, format="json")
+        assert resp.status_code == 401
+
+    def test_login_nonexistent_email_returns_401(self, db):
+        from rest_framework.test import APIClient
+        c = APIClient()
+        resp = c.post(self.url, {"email": "nobody@example.com", "password": "pass"}, format="json")
+        assert resp.status_code == 401
+
+    def test_login_inactive_user_returns_401(self, user):
+        from rest_framework.test import APIClient
+        user.is_active = False
+        user.save()
+        c = APIClient()
+        resp = c.post(self.url, {"email": "alice@example.com", "password": "strongpass123"}, format="json")
+        assert resp.status_code == 401
+
+
+@pytest.mark.django_db
+class TestAuthLogoutView:
+    url = "/api/auth/logout"
+
+    def _make_client_with_session(self, user):
+        import hashlib, secrets
+        from datetime import timedelta
+        from rest_framework.test import APIClient
+        raw = secrets.token_hex(32)
+        token_hash = hashlib.sha256(raw.encode()).hexdigest()
+        raw_refresh = secrets.token_hex(32)
+        refresh_hash = hashlib.sha256(raw_refresh.encode()).hexdigest()
+        session = UserService.create_session(
+            user=user,
+            token_hash=token_hash,
+            expires_at=timezone.now() + timedelta(minutes=15),
+            refresh_token_hash=refresh_hash,
+            refresh_expires_at=timezone.now() + timedelta(days=7),
+        )
+        c = APIClient()
+        c.credentials(HTTP_AUTHORIZATION=f"Bearer {raw}")
+        return c, session
+
+    def test_logout_deletes_session(self, user):
+        c, session = self._make_client_with_session(user)
+        resp = c.post(self.url)
+        assert resp.status_code in (200, 204)
+        assert not UserSession.objects.filter(pk=session.pk).exists()
+
+    def test_logout_unauthenticated_returns_401(self, db):
+        from rest_framework.test import APIClient
+        c = APIClient()
+        resp = c.post(self.url)
+        assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# API: User detail & preferences
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+class TestUserDetailView:
+    def test_get_own_profile(self, user):
+        from rest_framework.test import APIClient
+        c = APIClient()
+        c.force_authenticate(user=user)
+        resp = c.get(f"/api/users/{user.pk}/")
+        assert resp.status_code == 200
+        assert resp.json()["email"] == "alice@example.com"
+
+    def test_other_authenticated_user_can_read_profile(self, user, db):
+        from rest_framework.test import APIClient
+        other = User.objects.create_user(email="other@example.com", password="p", display_name="O")
+        c = APIClient()
+        c.force_authenticate(user=other)
+        resp = c.get(f"/api/users/{user.pk}/")
+        # Profile read is allowed for authenticated users; patch is restricted
+        assert resp.status_code == 200
+
+    def test_patch_display_name(self, user):
+        from rest_framework.test import APIClient
+        c = APIClient()
+        c.force_authenticate(user=user)
+        resp = c.patch(f"/api/users/{user.pk}/", {"display_name": "Alice Updated"}, format="json")
+        assert resp.status_code == 200
+        user.refresh_from_db()
+        assert user.display_name == "Alice Updated"
+
+    def test_unauthenticated_returns_401(self, user, db):
+        from rest_framework.test import APIClient
+        c = APIClient()
+        resp = c.get(f"/api/users/{user.pk}/")
+        assert resp.status_code == 401
+
+
+@pytest.mark.django_db
+class TestUserPreferencesView:
+    def test_get_preferences(self, user):
+        from rest_framework.test import APIClient
+        c = APIClient()
+        c.force_authenticate(user=user)
+        resp = c.get(f"/api/users/{user.pk}/preferences/")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "theme" in data
+        assert "language" in data
+
+    def test_update_preferences(self, user):
+        from rest_framework.test import APIClient
+        c = APIClient()
+        c.force_authenticate(user=user)
+        resp = c.put(f"/api/users/{user.pk}/preferences/", {"theme": "dark", "language": "en", "default_view": "board"}, format="json")
+        assert resp.status_code == 200
+        assert resp.json()["theme"] == "dark"
+
+    def test_other_user_cannot_update_preferences(self, user, db):
+        from rest_framework.test import APIClient
+        other = User.objects.create_user(email="other2@example.com", password="p", display_name="O2")
+        c = APIClient()
+        c.force_authenticate(user=other)
+        resp = c.put(f"/api/users/{user.pk}/preferences/", {"theme": "dark", "language": "en", "default_view": "list"}, format="json")
+        assert resp.status_code in (403, 404)

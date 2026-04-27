@@ -22,12 +22,21 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "rest_framework",
+    "drf_spectacular",
     "corsheaders",
     "users",
     "projects",
     "tasks",
     "analytics",
 ]
+
+SPECTACULAR_SETTINGS = {
+    "TITLE": "Dodoist API",
+    "DESCRIPTION": "Task and project management API combining personal todos with Scrum/Kanban workflows.",
+    "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
+    "COMPONENT_SPLIT_REQUEST": True,
+}
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [

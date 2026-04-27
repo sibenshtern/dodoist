@@ -1192,3 +1192,321 @@ class TestWipLimit:
         client.force_authenticate(user=user)
         resp = client.post(f"/api/tasks/{t2.pk}/move-column/", {"column_id": str(column.pk)}, format="json")
         assert resp.status_code == 409
+
+
+# ---------------------------------------------------------------------------
+# API: Task detail (GET / PATCH / DELETE)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+class TestTaskDetailView:
+    def test_member_can_get_task(self, task, user):
+        c = APIClient()
+        c.force_authenticate(user=user)
+        resp = c.get(f"/api/tasks/{task.pk}/")
+        assert resp.status_code == 200
+        assert resp.json()["title"] == "Fix bug"
+
+    def test_non_member_cannot_get_task(self, task, other_user):
+        c = APIClient()
+        c.force_authenticate(user=other_user)
+        resp = c.get(f"/api/tasks/{task.pk}/")
+        assert resp.status_code in (403, 404)
+
+    def test_member_can_patch_title(self, task, user):
+        c = APIClient()
+        c.force_authenticate(user=user)
+        resp = c.patch(f"/api/tasks/{task.pk}/", {"title": "Updated"}, format="json")
+        assert resp.status_code == 200
+        assert resp.json()["title"] == "Updated"
+
+    def test_patch_status_creates_activity(self, task, user):
+        from tasks.models import ActivityLog
+        c = APIClient()
+        c.force_authenticate(user=user)
+        c.patch(f"/api/tasks/{task.pk}/", {"status": "in_progress"}, format="json")
+        assert ActivityLog.objects.filter(entity_id=task.pk, action="status_changed").exists()
+
+    def test_member_can_delete_task(self, task, user):
+        c = APIClient()
+        c.force_authenticate(user=user)
+        resp = c.delete(f"/api/tasks/{task.pk}/")
+        assert resp.status_code == 204
+
+    def test_unauthenticated_returns_401(self, task):
+        c = APIClient()
+        resp = c.get(f"/api/tasks/{task.pk}/")
+        assert resp.status_code == 401
+
+
+@pytest.mark.django_db
+class TestTaskRestoreView:
+    def test_restore_soft_deleted_task(self, task, user, db):
+        # Only elevated users can restore deleted tasks (can_edit_task returns
+        # False for deleted tasks for regular project members).
+        elevated = User.objects.create_user(
+            email="sa@example.com", password="p", display_name="SA",
+            global_role=GlobalRole.SA,
+        )
+        TaskService.soft_delete(task, actor=user)
+        c = APIClient()
+        c.force_authenticate(user=elevated)
+        resp = c.post(f"/api/tasks/{task.pk}/restore/")
+        assert resp.status_code == 200
+        task.refresh_from_db()
+        assert task.deleted_at is None
+
+    def test_regular_member_cannot_restore_deleted_task(self, task, user):
+        TaskService.soft_delete(task, actor=user)
+        c = APIClient()
+        c.force_authenticate(user=user)
+        resp = c.post(f"/api/tasks/{task.pk}/restore/")
+        assert resp.status_code == 403
+
+    def test_restore_non_deleted_task_returns_400(self, task, user, db):
+        elevated = User.objects.create_user(
+            email="sa2@example.com", password="p", display_name="SA2",
+            global_role=GlobalRole.SA,
+        )
+        c = APIClient()
+        c.force_authenticate(user=elevated)
+        resp = c.post(f"/api/tasks/{task.pk}/restore/")
+        assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# API: Comments
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+class TestTaskCommentListView:
+    def test_list_comments(self, task, user):
+        CommentService.add_comment(task=task, author=user, body={"type": "doc", "content": []})
+        c = APIClient()
+        c.force_authenticate(user=user)
+        resp = c.get(f"/api/tasks/{task.pk}/comments/")
+        assert resp.status_code == 200
+        assert len(resp.json()) == 1
+
+    def test_add_comment(self, task, user):
+        c = APIClient()
+        c.force_authenticate(user=user)
+        resp = c.post(f"/api/tasks/{task.pk}/comments/", {"body": {"type": "doc", "content": []}}, format="json")
+        assert resp.status_code == 201
+        assert Comment.objects.filter(task=task).count() == 1
+
+    def test_non_member_cannot_comment(self, task, other_user):
+        c = APIClient()
+        c.force_authenticate(user=other_user)
+        resp = c.post(f"/api/tasks/{task.pk}/comments/", {"body": {"type": "doc", "content": []}}, format="json")
+        assert resp.status_code in (403, 404)
+
+    def test_unauthenticated_returns_401(self, task):
+        c = APIClient()
+        resp = c.get(f"/api/tasks/{task.pk}/comments/")
+        assert resp.status_code == 401
+
+
+@pytest.mark.django_db
+class TestCommentDetailView:
+    def test_author_can_edit_comment(self, task, user):
+        comment = CommentService.add_comment(task=task, author=user, body={"type": "doc", "content": []})
+        c = APIClient()
+        c.force_authenticate(user=user)
+        new_body = {"type": "doc", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "edited"}]}]}
+        resp = c.patch(f"/api/comments/{comment.pk}/", {"body": new_body}, format="json")
+        assert resp.status_code == 200
+        assert resp.json()["is_edited"] is True
+
+    def test_non_author_cannot_edit(self, task, user, other_user, project):
+        ProjectMember.objects.create(project=project, user=other_user, role=ProjectRole.DEV)
+        comment = CommentService.add_comment(task=task, author=user, body={"type": "doc", "content": []})
+        c = APIClient()
+        c.force_authenticate(user=other_user)
+        resp = c.patch(f"/api/comments/{comment.pk}/", {"body": {}}, format="json")
+        assert resp.status_code == 403
+
+    def test_author_can_delete_comment(self, task, user):
+        comment = CommentService.add_comment(task=task, author=user, body={"type": "doc", "content": []})
+        c = APIClient()
+        c.force_authenticate(user=user)
+        resp = c.delete(f"/api/comments/{comment.pk}/")
+        assert resp.status_code == 204
+
+
+# ---------------------------------------------------------------------------
+# API: Reactions
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+class TestCommentReactionView:
+    def test_add_reaction(self, task, user):
+        comment = CommentService.add_comment(task=task, author=user, body={"type": "doc", "content": []})
+        c = APIClient()
+        c.force_authenticate(user=user)
+        resp = c.post(f"/api/comments/{comment.pk}/reactions/", {"emoji": "👍"}, format="json")
+        assert resp.status_code == 201
+
+    def test_remove_reaction(self, task, user):
+        from tasks.models import Reaction
+        comment = CommentService.add_comment(task=task, author=user, body={"type": "doc", "content": []})
+        Reaction.objects.create(comment=comment, user=user, emoji="👍")
+        c = APIClient()
+        c.force_authenticate(user=user)
+        resp = c.delete(f"/api/comments/{comment.pk}/reactions/👍/")
+        assert resp.status_code == 204
+        assert not Reaction.objects.filter(comment=comment, user=user, emoji="👍").exists()
+
+    def test_duplicate_reaction_is_idempotent(self, task, user):
+        from tasks.models import Reaction
+        comment = CommentService.add_comment(task=task, author=user, body={"type": "doc", "content": []})
+        c = APIClient()
+        c.force_authenticate(user=user)
+        c.post(f"/api/comments/{comment.pk}/reactions/", {"emoji": "❤️"}, format="json")
+        c.post(f"/api/comments/{comment.pk}/reactions/", {"emoji": "❤️"}, format="json")
+        assert Reaction.objects.filter(comment=comment, user=user, emoji="❤️").count() == 1
+
+
+# ---------------------------------------------------------------------------
+# API: Time logs
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+class TestTaskTimeLogView:
+    def test_list_empty(self, task, user):
+        c = APIClient()
+        c.force_authenticate(user=user)
+        resp = c.get(f"/api/tasks/{task.pk}/time-logs/")
+        assert resp.status_code == 200
+        assert resp.json()["data"] == []
+
+    def test_add_time_log(self, task, user):
+        from tasks.models import TimeLog
+        c = APIClient()
+        c.force_authenticate(user=user)
+        resp = c.post(
+            f"/api/tasks/{task.pk}/time-logs/",
+            {"logged_minutes": 90, "logged_date": "2026-01-15", "description": "debugging"},
+            format="json",
+        )
+        assert resp.status_code == 201
+        assert TimeLog.objects.filter(task=task).count() == 1
+
+    def test_total_minutes_in_meta(self, task, user):
+        from tasks.models import TimeLog
+        TimeLog.objects.create(task=task, user=user, logged_minutes=60, logged_date="2026-01-15")
+        TimeLog.objects.create(task=task, user=user, logged_minutes=30, logged_date="2026-01-16")
+        c = APIClient()
+        c.force_authenticate(user=user)
+        resp = c.get(f"/api/tasks/{task.pk}/time-logs/")
+        assert resp.json()["meta"]["total_minutes"] == 90
+
+    def test_delete_time_log(self, task, user):
+        from tasks.models import TimeLog
+        log = TimeLog.objects.create(task=task, user=user, logged_minutes=45, logged_date="2026-01-15")
+        c = APIClient()
+        c.force_authenticate(user=user)
+        resp = c.delete(f"/api/time-logs/{log.pk}/")
+        assert resp.status_code == 204
+        assert not TimeLog.objects.filter(pk=log.pk).exists()
+
+    def test_non_member_cannot_add_log(self, task, other_user):
+        c = APIClient()
+        c.force_authenticate(user=other_user)
+        resp = c.post(
+            f"/api/tasks/{task.pk}/time-logs/",
+            {"logged_minutes": 30, "logged_date": "2026-01-15"},
+            format="json",
+        )
+        assert resp.status_code in (403, 404)
+
+
+# ---------------------------------------------------------------------------
+# API: Activity log
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+class TestTaskActivityView:
+    def test_returns_activity(self, task, user):
+        c = APIClient()
+        c.force_authenticate(user=user)
+        resp = c.get(f"/api/tasks/{task.pk}/activity/")
+        assert resp.status_code == 200
+        assert isinstance(resp.json(), list)
+
+    def test_shows_status_change(self, task, user):
+        TaskService.update_status(task, new_status="in_progress", actor=user)
+        c = APIClient()
+        c.force_authenticate(user=user)
+        resp = c.get(f"/api/tasks/{task.pk}/activity/")
+        actions = [entry["action"] for entry in resp.json()]
+        assert "status_changed" in actions
+
+    def test_non_member_returns_403_or_404(self, task, other_user):
+        c = APIClient()
+        c.force_authenticate(user=other_user)
+        resp = c.get(f"/api/tasks/{task.pk}/activity/")
+        assert resp.status_code in (403, 404)
+
+
+# ---------------------------------------------------------------------------
+# API: Today tasks & My tasks
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+class TestTodayTasksView:
+    def test_returns_tasks_due_today(self, project, user):
+        from django.utils import timezone as tz
+        # Must be assigned to user and have due_date within the view's ±3-day window
+        t = TaskService.create_task(project=project, creator=user, title="Due today")
+        t.due_date = tz.now()
+        t.assigned_to = user
+        t.save(update_fields=["due_date", "assigned_to"])
+        c = APIClient()
+        c.force_authenticate(user=user)
+        resp = c.get("/api/tasks/today/")
+        assert resp.status_code == 200
+        ids = [item["id"] for item in resp.json()]
+        assert str(t.pk) in ids
+
+    def test_does_not_return_far_future_tasks(self, project, user):
+        from django.utils import timezone as tz
+        from datetime import timedelta
+        t = TaskService.create_task(project=project, creator=user, title="Future")
+        t.due_date = tz.now() + timedelta(days=10)
+        t.assigned_to = user
+        t.save(update_fields=["due_date", "assigned_to"])
+        c = APIClient()
+        c.force_authenticate(user=user)
+        resp = c.get("/api/tasks/today/")
+        ids = [item["id"] for item in resp.json()]
+        assert str(t.pk) not in ids
+
+    def test_unauthenticated_returns_401(self):
+        c = APIClient()
+        resp = c.get("/api/tasks/today/")
+        assert resp.status_code == 401
+
+
+@pytest.mark.django_db
+class TestMyTasksView:
+    def test_returns_assigned_tasks(self, project, user):
+        t = TaskService.create_task(project=project, creator=user, title="Mine")
+        TaskService.assign_user(t, user, assigned_by=user)
+        c = APIClient()
+        c.force_authenticate(user=user)
+        resp = c.get("/api/tasks/my/")
+        assert resp.status_code == 200
+        ids = [item["id"] for item in resp.json()]
+        assert str(t.pk) in ids
+
+    def test_does_not_return_others_tasks(self, project, user, other_user, workspace):
+        from users.services import UserService as US
+        ProjectMember.objects.create(project=project, user=other_user, role=ProjectRole.DEV)
+        t = TaskService.create_task(project=project, creator=user, title="Not mine")
+        TaskService.assign_user(t, other_user, assigned_by=user)
+        c = APIClient()
+        c.force_authenticate(user=user)
+        resp = c.get("/api/tasks/my/")
+        ids = [item["id"] for item in resp.json()]
+        assert str(t.pk) not in ids
