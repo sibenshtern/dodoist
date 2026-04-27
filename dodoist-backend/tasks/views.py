@@ -26,6 +26,7 @@ from .serializers import (
     TaskGuestAccessSerializer,
     TaskLabelAddSerializer,
     TaskLabelSerializer,
+    TaskSearchResultSerializer,
     TaskSerializer,
     TaskUpdateSerializer,
     TimeLogCreateSerializer,
@@ -1214,3 +1215,48 @@ class AttachmentDetailView(APIView):
 
         AttachmentService.delete_attachment(attachment, request.user)
         return Response(status=204)
+
+
+class TaskSearchView(APIView):
+    """
+    GET /api/tasks/search/?q=<query>
+    Cross-project full-text search across all projects the caller can access.
+    Returns up to 20 matching tasks ordered by relevance (recency).
+    """
+
+    def get(self, request):
+        q = request.query_params.get("q", "").strip()
+        if len(q) < 2:
+            return Response([])
+
+        # Determine which projects the caller can see
+        if request.user.has_elevated_access():
+            accessible_pids = Project.objects.filter(
+                status=ProjectStatus.ACTIVE
+            ).values_list("id", flat=True)
+        else:
+            accessible_pids = ProjectMember.objects.filter(
+                user=request.user
+            ).values_list("project_id", flat=True)
+
+        tasks = (
+            Task.objects.filter(
+                project_id__in=accessible_pids,
+                deleted_at__isnull=True,
+                title__icontains=q,
+            )
+            .select_related("project", "assigned_to")
+            .order_by("-updated_at")[:20]
+        )
+
+        # Guests only see public tasks in their accessible projects
+        if not request.user.has_elevated_access():
+            guest_project_ids = ProjectMember.objects.filter(
+                user=request.user, role=ProjectRole.GU
+            ).values_list("project_id", flat=True)
+            tasks = [
+                t for t in tasks
+                if not (t.project_id in guest_project_ids and t.is_private)
+            ]
+
+        return Response(TaskSearchResultSerializer(tasks, many=True).data)

@@ -29,6 +29,7 @@ from .views import (
     TaskListCreateView,
     TaskMoveColumnView,
     TaskRestoreView,
+    TaskSearchView,
     TaskSubtaskListView,
     TaskTimeLogListView,
     TimeLogDetailView,
@@ -39,6 +40,7 @@ urlpatterns = [
     path("api/dashboard/stats/", DashboardStatsView.as_view(), name="dashboard-stats"),
 
     # Home page endpoints
+    path("api/tasks/search/", TaskSearchView.as_view(), name="tasks-search"),
     path("api/tasks/today/", TodayTasksView.as_view(), name="tasks-today"),
     path("api/tasks/my/", MyTasksView.as_view(), name="tasks-my"),
     path("api/activity/", UserActivityView.as_view(), name="user-activity"),

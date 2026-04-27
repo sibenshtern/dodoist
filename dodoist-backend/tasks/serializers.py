@@ -19,6 +19,21 @@ class LabelBriefSerializer(serializers.Serializer):
     color = serializers.CharField(source='label.color')
 
 
+class TaskSearchResultSerializer(serializers.ModelSerializer):
+    """Lightweight serializer for cross-project search results."""
+    assigned_to = UserBriefSerializer(read_only=True)
+    project_name = serializers.CharField(source='project.name', read_only=True)
+    project_color = serializers.CharField(source='project.color', read_only=True)
+
+    class Meta:
+        model = Task
+        fields = [
+            'id', 'title', 'status', 'priority', 'type',
+            'project', 'project_name', 'project_color',
+            'assigned_to', 'due_date', 'is_private',
+        ]
+
+
 class TaskSerializer(serializers.ModelSerializer):
     created_by = UserBriefSerializer(read_only=True)
     assigned_to = UserBriefSerializer(read_only=True)
