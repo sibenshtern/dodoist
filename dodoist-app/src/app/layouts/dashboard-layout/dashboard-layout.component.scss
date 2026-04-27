@@ -143,6 +143,47 @@ $font-b: 'Manrope', sans-serif;
   font-size: 14px;
 }
 
+// ── Search trigger ────────────────────────────────────────────────────────────
+
+.search-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  margin-bottom: 10px;
+  border: 1.111px solid $border;
+  border-radius: 8px;
+  background: $white;
+  color: $gray-lt;
+  font-family: $font-b;
+  font-size: 12.5px;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.12s, color 0.12s, box-shadow 0.12s;
+
+  &:hover {
+    border-color: #ccc9c4;
+    color: $gray;
+    box-shadow: 0 1px 4px rgba(26, 24, 20, 0.06);
+  }
+
+  svg { flex-shrink: 0; }
+}
+
+.search-trigger__text { flex: 1; }
+
+.search-trigger__kbd {
+  font-family: $font-b;
+  font-size: 10px;
+  background: $bg-page;
+  border: 1px solid $border;
+  border-radius: 4px;
+  padding: 1px 5px;
+  flex-shrink: 0;
+}
+
 // ── Nav ───────────────────────────────────────────────────────────────────────
 
 .nav {

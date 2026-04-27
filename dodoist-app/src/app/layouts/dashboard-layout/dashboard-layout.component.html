@@ -17,6 +17,15 @@
       <tui-icon icon="@tui.chevron-down" class="workspace-chevron" />
     </button>
 
+    <button class="search-trigger" (click)="searchOpen.set(true)" title="Search tasks (⌘K)">
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+        <circle cx="5.5" cy="5.5" r="4" stroke="currentColor" stroke-width="1.4"/>
+        <path d="M9 9L12.5 12.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      </svg>
+      <span class="search-trigger__text">Search…</span>
+      <kbd class="search-trigger__kbd">⌘K</kbd>
+    </button>
+
     <nav class="nav">
       @for (item of navItems; track item.path) {
         <a
@@ -71,3 +80,7 @@
   </main>
 
 </div>
+
+@if (searchOpen()) {
+  <app-search-palette (close)="searchOpen.set(false)" />
+}
