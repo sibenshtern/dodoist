@@ -1,3 +1,4 @@
 export const environment = {
-  apiBase: 'https://api.dodoist.com',
+  // Empty string → requests go to the same origin; nginx proxies /api/* to Django.
+  apiBase: '',
 };

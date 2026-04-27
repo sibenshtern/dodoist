@@ -1,4 +1,5 @@
 import { Component, computed, HostListener, inject, OnDestroy, OnInit, signal } from '@angular/core';
+import { UpperCasePipe } from '@angular/common';
 import { Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { TuiIcon } from '@taiga-ui/core';
 import { interval, Subscription, switchMap, EMPTY } from 'rxjs';
@@ -19,7 +20,7 @@ interface NavItem {
 @Component({
   selector: 'app-dashboard-layout',
   standalone: true,
-  imports: [RouterOutlet, RouterLink, RouterLinkActive, TuiIcon, SearchPaletteComponent],
+  imports: [RouterOutlet, RouterLink, RouterLinkActive, TuiIcon, SearchPaletteComponent, UpperCasePipe],
   templateUrl: './dashboard-layout.component.html',
   styleUrl: './dashboard-layout.component.scss',
 })
@@ -58,6 +59,14 @@ export class DashboardLayoutComponent implements OnInit, OnDestroy {
       event.preventDefault();
       this.searchOpen.update(v => !v);
     }
+    if (event.key === 'Escape') {
+      this.wsDropdownOpen.set(false);
+    }
+  }
+
+  @HostListener('document:click')
+  onDocumentClick(): void {
+    this.wsDropdownOpen.set(false);
   }
 
   readonly currentUserName = computed(
@@ -95,8 +104,9 @@ export class DashboardLayoutComponent implements OnInit, OnDestroy {
     // After that, toObservable on currentWorkspace keeps the list in sync whenever the user
     // switches workspace (e.g. from the /workspaces page).
     this.userService.loadCurrentUser().subscribe({ error: console.error });
+    this.userService.loadWorkspaces().subscribe({ error: console.error });
 
-    this.pollSub = this.workspace$.pipe(
+    this.projectSub = this.workspace$.pipe(
       switchMap(ws => {
         if (!ws) return EMPTY;
         return this.dashboardService.getProjectsForActiveWorkspace(ws.slug);
@@ -111,7 +121,7 @@ export class DashboardLayoutComponent implements OnInit, OnDestroy {
     const notifPoll = interval(60_000).subscribe(() => {
       this.notifService.list({ limit: 50 }).subscribe({ error: console.error });
     });
-    this.pollSub.add(notifPoll);
+    this.projectSub.add(notifPoll);
   }
 
   ngOnDestroy(): void {
@@ -121,15 +131,32 @@ export class DashboardLayoutComponent implements OnInit, OnDestroy {
 
   switchWorkspace(ws: import('../../services/user.service').Workspace): void {
     if (this.isSwitching()) return;
+
+    const current = this.userService.currentWorkspace();
+    if (current) {
+      this.saveTab(current.id, this.router.url);
+    }
+
     this.isSwitching.set(true);
     this.userService.switchWorkspace(ws).subscribe({
       next: () => {
         this.wsDropdownOpen.set(false);
         this.isSwitching.set(false);
-        this.router.navigate(['/home']);
+        this.router.navigateByUrl(this.restoreTab(ws.id));
       },
       error: () => this.isSwitching.set(false),
     });
+  }
+
+  private saveTab(wsId: string, url: string): void {
+    const tabs: Record<string, string> = JSON.parse(localStorage.getItem('ws_tabs') ?? '{}');
+    tabs[wsId] = url;
+    localStorage.setItem('ws_tabs', JSON.stringify(tabs));
+  }
+
+  private restoreTab(wsId: string): string {
+    const tabs: Record<string, string> = JSON.parse(localStorage.getItem('ws_tabs') ?? '{}');
+    return tabs[wsId] ?? '/home';
   }
 
   logout(): void {

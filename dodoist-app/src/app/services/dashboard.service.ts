@@ -137,11 +137,6 @@ export class DashboardService {
     );
   }
 
-  getProjectsForActiveWorkspace(workspaceSlug: string): Observable<ProjectSummary[]> {
-    return this.getProjects(workspaceSlug);
-  }
-
-  /** Fetch projects for a single active workspace. */
   getProjectsForActiveWorkspace(slug: string): Observable<ProjectSummary[]> {
     return this.getProjects(slug).pipe(catchError(() => of([])));
   }

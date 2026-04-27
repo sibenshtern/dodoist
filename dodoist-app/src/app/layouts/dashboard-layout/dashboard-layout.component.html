@@ -8,14 +8,59 @@
       <span class="brand-name">Dodoist</span>
     </div>
 
-    <a class="workspace-switcher" routerLink="/workspaces">
-      <div class="workspace-icon">{{ workspaceInitial() }}</div>
-      <div class="workspace-info">
-        <span class="workspace-name">{{ workspaceName() }}</span>
-        <span class="workspace-plan">{{ workspacePlan() }}</span>
-      </div>
-      <tui-icon icon="@tui.chevron-down" class="workspace-chevron" />
-    </a>
+    <div class="workspace-switcher-wrap" (click)="$event.stopPropagation()">
+      <button
+        class="workspace-switcher"
+        [class.workspace-switcher--open]="wsDropdownOpen()"
+        (click)="wsDropdownOpen.update(v => !v)"
+        [attr.aria-expanded]="wsDropdownOpen()"
+        aria-haspopup="listbox"
+      >
+        <div class="workspace-icon">{{ workspaceInitial() }}</div>
+        <div class="workspace-info">
+          <span class="workspace-name">{{ workspaceName() }}</span>
+          <span class="workspace-plan">{{ workspacePlan() }}</span>
+        </div>
+        <tui-icon
+          icon="@tui.chevron-down"
+          class="workspace-chevron"
+          [class.flipped]="wsDropdownOpen()"
+        />
+      </button>
+
+      @if (wsDropdownOpen()) {
+        <div class="ws-dropdown" role="listbox">
+          @for (ws of workspaceList(); track ws.id) {
+            <button
+              class="ws-dropdown__item"
+              [class.ws-dropdown__item--active]="ws.id === userService.currentWorkspace()?.id"
+              [disabled]="isSwitching()"
+              (click)="switchWorkspace(ws)"
+              role="option"
+              [attr.aria-selected]="ws.id === userService.currentWorkspace()?.id"
+            >
+              <span class="ws-dropdown__initial">{{ ws.name[0] | uppercase }}</span>
+              <span class="ws-dropdown__name">{{ ws.name }}</span>
+              @if (ws.id === userService.currentWorkspace()?.id) {
+                <tui-icon icon="@tui.check" class="ws-dropdown__check" />
+              }
+            </button>
+          }
+          @if (workspaceList().length === 0) {
+            <span class="ws-dropdown__empty">Loading…</span>
+          }
+          <div class="ws-dropdown__divider"></div>
+          <a
+            class="ws-dropdown__item ws-dropdown__manage"
+            routerLink="/workspaces"
+            (click)="wsDropdownOpen.set(false)"
+          >
+            <tui-icon icon="@tui.settings" class="ws-dropdown__manage-icon" />
+            <span>Manage workspaces</span>
+          </a>
+        </div>
+      }
+    </div>
 
     <button class="search-trigger" (click)="searchOpen.set(true)" title="Search tasks (⌘K)">
       <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">

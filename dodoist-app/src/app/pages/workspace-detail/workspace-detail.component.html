@@ -1,0 +1,356 @@
+<div class="settings-page">
+
+  <!-- ── Header ──────────────────────────────────────────────────────────────── -->
+  <header class="settings-header">
+    <a routerLink="/workspaces" class="back-link">
+      <tui-icon icon="@tui.arrow-left" class="back-icon" />
+      Workspaces
+    </a>
+
+    @if (ws()) {
+      <div class="header-row">
+        <div class="ws-avatar">{{ initials(ws()!.name) }}</div>
+        <div class="header-text">
+          <h1 class="header-title">{{ ws()!.name }}</h1>
+          <div class="header-badges">
+            <span class="badge badge--plan">{{ ws()!.plan | titlecase }} plan</span>
+            @if (ws()!.is_personal) {
+              <span class="badge badge--personal">Personal</span>
+            }
+            @if (isDeletedWs()) {
+              <span class="badge badge--warn">Scheduled for deletion</span>
+            }
+          </div>
+        </div>
+      </div>
+    }
+  </header>
+
+  @if (isLoading()) {
+    <div class="skeleton-stack">
+      <div class="skeleton"></div>
+      <div class="skeleton"></div>
+      <div class="skeleton skeleton--short"></div>
+    </div>
+  } @else if (ws()) {
+
+    <!-- ── Deletion Banner ───────────────────────────────────────────────────── -->
+    @if (isDeletedWs()) {
+      <div class="deletion-banner">
+        <div class="deletion-banner__body">
+          <tui-icon icon="@tui.triangle-alert" class="deletion-banner__icon" />
+          <div>
+            <strong>Deletion scheduled</strong>
+            <p>This workspace will be permanently deleted on
+              <strong>{{ ws()!.delete_scheduled_for | date:'mediumDate' }}</strong>.
+              All projects and tasks will be lost.</p>
+          </div>
+        </div>
+        @if (isOwner()) {
+          <button class="btn btn--secondary" (click)="restoreWs()" [disabled]="acting()">
+            {{ acting() ? 'Restoring…' : 'Restore workspace' }}
+          </button>
+        }
+      </div>
+    }
+
+    <!-- ── General Settings ─────────────────────────────────────────────────── -->
+    @if (canManage()) {
+      <section class="settings-section">
+        <div class="section-header">
+          <h2 class="section-title">General</h2>
+        </div>
+        <form [formGroup]="form" (ngSubmit)="save()" class="settings-form">
+          <div class="field">
+            <label class="field-label" for="ws-name">Workspace name</label>
+            <input id="ws-name" formControlName="name" type="text" class="input" placeholder="My workspace" />
+          </div>
+          <div class="field">
+            <label class="field-label" for="ws-desc">
+              Description
+              <span class="field-optional">optional</span>
+            </label>
+            <textarea
+              id="ws-desc"
+              formControlName="description"
+              rows="3"
+              class="input input--textarea"
+              placeholder="What this workspace is for…"
+            ></textarea>
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <span class="field-label">URL slug</span>
+              <div class="slug-display">
+                <span class="slug-prefix">dodoist.com/</span>
+                <span class="slug-value">{{ slug() }}</span>
+              </div>
+            </div>
+            <div class="field">
+              <span class="field-label">Created</span>
+              <span class="meta-value">{{ ws()!.created_at | date:'mediumDate' }}</span>
+            </div>
+            <div class="field">
+              <span class="field-label">Owner</span>
+              <span class="meta-value">{{ ws()!.owner.display_name }}</span>
+            </div>
+          </div>
+          <div class="form-actions">
+            <button
+              type="submit"
+              class="btn btn--primary"
+              [disabled]="saving() || form.invalid || form.pristine"
+            >
+              {{ saving() ? 'Saving…' : 'Save changes' }}
+            </button>
+            @if (saved()) {
+              <span class="success-msg">
+                <tui-icon icon="@tui.check" />
+                Saved
+              </span>
+            }
+          </div>
+        </form>
+      </section>
+    }
+
+    <!-- ── Members ──────────────────────────────────────────────────────────── -->
+    <section class="settings-section">
+      <div class="section-header">
+        <div>
+          <h2 class="section-title">Members</h2>
+          <p class="section-desc">
+            {{ members().length }} member{{ members().length !== 1 ? 's' : '' }}
+          </p>
+        </div>
+        <a [routerLink]="['/workspaces', slug(), 'members']" class="btn btn--secondary">
+          Manage members
+        </a>
+      </div>
+      @if (visibleMembers().length > 0) {
+        <div class="members-row">
+          @for (m of visibleMembers(); track m.id) {
+            <div
+              class="member-avatar"
+              [class.member-avatar--owner]="m.role === 'OWNER'"
+              [class.member-avatar--admin]="m.role === 'ADMIN'"
+              [title]="m.user.display_name + ' — ' + (m.role | titlecase)"
+            >
+              {{ initials(m.user.display_name) }}
+            </div>
+          }
+          @if (overflowMemberCount() > 0) {
+            <div class="member-avatar member-avatar--overflow">+{{ overflowMemberCount() }}</div>
+          }
+        </div>
+      }
+    </section>
+
+    <!-- ── Invitations ──────────────────────────────────────────────────────── -->
+    @if (canManage()) {
+      <section class="settings-section">
+        <div class="section-header">
+          <div>
+            <h2 class="section-title">Invite people</h2>
+            <p class="section-desc">
+              {{ pendingInvitations().length }} pending invitation{{ pendingInvitations().length !== 1 ? 's' : '' }}
+            </p>
+          </div>
+          <div class="invite-controls">
+            <select [(ngModel)]="inviteRole" class="input input--select input--sm">
+              <option value="MEMBER">Member</option>
+              <option value="ADMIN">Admin</option>
+            </select>
+            <button
+              class="btn btn--secondary"
+              (click)="showEmailInvite.update(v => !v)"
+            >
+              <tui-icon icon="@tui.mail" />
+              Email
+            </button>
+            <button
+              class="btn btn--secondary"
+              (click)="generateInviteLink()"
+              [disabled]="acting()"
+              title="Generate invite link"
+            >
+              <tui-icon icon="@tui.link" />
+              Link
+            </button>
+          </div>
+        </div>
+
+        @if (showEmailInvite()) {
+          <div class="invite-form">
+            <input
+              [(ngModel)]="inviteEmail"
+              type="email"
+              class="input"
+              placeholder="colleague@company.com"
+              (keydown.enter)="sendEmailInvite()"
+            />
+            <button
+              class="btn btn--primary"
+              (click)="sendEmailInvite()"
+              [disabled]="!inviteEmail.trim() || acting()"
+            >
+              {{ acting() ? 'Sending…' : 'Send invite' }}
+            </button>
+            <button class="btn-icon" (click)="showEmailInvite.set(false)" title="Cancel">
+              <tui-icon icon="@tui.x" />
+            </button>
+          </div>
+        }
+
+        @if (generatedLink()) {
+          <div class="link-box">
+            <tui-icon icon="@tui.link" class="link-box__icon" />
+            <input class="link-box__input" [value]="generatedLink()" readonly />
+            <button class="btn btn--secondary" (click)="copyLink()">Copy</button>
+            <button class="btn-icon" (click)="generatedLink.set('')" title="Dismiss">
+              <tui-icon icon="@tui.x" />
+            </button>
+          </div>
+        }
+
+        @if (pendingInvitations().length > 0) {
+          <ul class="invite-list">
+            @for (inv of pendingInvitations(); track inv.id) {
+              <li class="invite-item">
+                <div class="invite-item__meta">
+                  @if (inv.kind === 'email') {
+                    <tui-icon icon="@tui.mail" class="invite-kind-icon" />
+                    <span class="invite-target">{{ inv.email }}</span>
+                  } @else {
+                    <tui-icon icon="@tui.link" class="invite-kind-icon" />
+                    <span class="invite-target">
+                      Invite link
+                      @if (inv.max_uses) { · {{ inv.use_count }}/{{ inv.max_uses }} uses }
+                    </span>
+                  }
+                  <span class="invite-role">{{ inv.role_to_grant | titlecase }}</span>
+                  @if (inv.expires_at) {
+                    <span class="invite-expiry">Expires {{ inv.expires_at | date:'shortDate' }}</span>
+                  }
+                </div>
+                <button
+                  class="btn-revoke"
+                  (click)="revokeInvitation(inv.id)"
+                  title="Revoke invitation"
+                >
+                  <tui-icon icon="@tui.x" />
+                </button>
+              </li>
+            }
+          </ul>
+        }
+      </section>
+    }
+
+    <!-- ── Danger Zone (Owner) ──────────────────────────────────────────────── -->
+    @if (isOwner()) {
+      <section class="settings-section settings-section--danger">
+        <h2 class="section-title section-title--danger">Danger zone</h2>
+
+        @if (!ws()!.is_personal) {
+          <!-- Transfer Ownership -->
+          <div class="danger-card">
+            <div class="danger-card__info">
+              <strong>Transfer ownership</strong>
+              <p class="muted">Assign a new owner. You become an Admin after transfer.</p>
+            </div>
+            <button
+              class="btn btn--outline-danger"
+              (click)="showTransfer.update(v => !v)"
+              [disabled]="acting()"
+            >
+              Transfer
+            </button>
+          </div>
+          @if (showTransfer()) {
+            <div class="transfer-form">
+              <select [(ngModel)]="transferMemberId" class="input input--select">
+                <option value="">Select new owner…</option>
+                @for (m of transferableMembers(); track m.id) {
+                  <option [value]="m.user.id">
+                    {{ m.user.display_name }} · {{ m.role | titlecase }}
+                  </option>
+                }
+              </select>
+              <button
+                class="btn btn--danger"
+                (click)="transferOwnership()"
+                [disabled]="!transferMemberId || acting()"
+              >
+                Confirm transfer
+              </button>
+              <button class="btn btn--secondary" (click)="showTransfer.set(false)">Cancel</button>
+            </div>
+          }
+
+          <!-- Delete Workspace -->
+          <div class="danger-card">
+            <div class="danger-card__info">
+              <strong>Delete workspace</strong>
+              <p class="muted">
+                @if (isDeletedWs()) {
+                  Scheduled. Restorable until {{ ws()!.delete_scheduled_for | date:'mediumDate' }}.
+                } @else {
+                  Schedules permanent deletion in 30 days. Restorable within that window.
+                }
+              </p>
+            </div>
+            @if (isDeletedWs()) {
+              <button class="btn btn--secondary" (click)="restoreWs()" [disabled]="acting()">
+                Restore
+              </button>
+            } @else {
+              <button class="btn btn--danger" (click)="deleteWs()" [disabled]="acting()">
+                Delete
+              </button>
+            }
+          </div>
+
+          <!-- Leave (locked for owner) -->
+          <div class="danger-card danger-card--locked">
+            <div class="danger-card__info">
+              <strong>Leave workspace</strong>
+              <p class="muted">Transfer ownership before leaving.</p>
+            </div>
+            <button class="btn btn--outline-danger" disabled>Leave</button>
+          </div>
+        }
+      </section>
+    } @else if (currentUserRole() === 'ADMIN' || currentUserRole() === 'MEMBER') {
+      <!-- Leave Workspace (non-owner) -->
+      <section class="settings-section settings-section--danger">
+        <h2 class="section-title section-title--danger">Danger zone</h2>
+        <div class="danger-card">
+          <div class="danger-card__info">
+            <strong>Leave workspace</strong>
+            <p class="muted">You will lose access to all projects in this workspace.</p>
+          </div>
+          <button
+            class="btn btn--outline-danger"
+            (click)="leaveWs()"
+            [disabled]="acting()"
+          >
+            Leave workspace
+          </button>
+        </div>
+      </section>
+    }
+
+    <!-- ── Error ─────────────────────────────────────────────────────────────── -->
+    @if (actionError()) {
+      <div class="error-toast">
+        <tui-icon icon="@tui.triangle-alert" />
+        {{ actionError() }}
+        <button class="btn-icon error-toast__close" (click)="actionError.set('')">
+          <tui-icon icon="@tui.x" />
+        </button>
+      </div>
+    }
+
+  }
+</div>

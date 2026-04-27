@@ -49,19 +49,9 @@ export class UserService {
   }
 
   loadWorkspaces(): Observable<Workspace[]> {
-    return this.http.get<Workspace[]>(`${environment.apiBase}/api/workspaces/`);
-  }
-
-  switchWorkspace(ws: Workspace): Observable<UserProfile> {
     return this.http
-      .patch<UserProfile>(
-        `${environment.apiBase}/api/users/me/active-workspace/`,
-        { workspace_slug: ws.slug },
-      )
-      .pipe(tap(user => {
-        this.currentUser.set(user);
-        this.currentWorkspace.set(ws);
-      }));
+      .get<Workspace[]>(`${environment.apiBase}/api/workspaces/`)
+      .pipe(tap(ws => this.workspaces.set(ws)));
   }
 
   switchWorkspace(workspace: Workspace): Observable<UserProfile> {

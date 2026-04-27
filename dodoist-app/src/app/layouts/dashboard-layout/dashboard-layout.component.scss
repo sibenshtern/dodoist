@@ -99,27 +99,42 @@ $font-b: 'Manrope', sans-serif;
   border-radius: 8px;
   cursor: pointer;
   text-align: left;
-  transition: background 0.12s, border-color 0.12s;
+  font-family: $font-b;
+  transition: background 0.12s, border-color 0.12s, box-shadow 0.12s;
 
   &:hover { background: $bg-page; border-color: #ccc9c4; }
+
+  &--open {
+    border-color: #ccc9c4;
+    box-shadow: 0 0 0 2.5px rgba($red, 0.12);
+  }
 }
 
 .workspace-chevron {
+  color: $gray-lt;
+  font-size: 13px;
+  flex-shrink: 0;
+  transition: transform 0.18s ease;
   &.flipped { transform: rotate(180deg); }
-  transition: transform 0.15s;
 }
 
 .ws-dropdown {
   position: absolute;
-  top: calc(100% + 4px);
+  top: calc(100% + 6px);
   left: 0;
   right: 0;
   background: $white;
   border: 1.111px solid $border;
-  border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.10);
-  z-index: 200;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(26, 24, 20, 0.11), 0 2px 6px rgba(26, 24, 20, 0.06);
+  z-index: 300;
   overflow: hidden;
+  animation: ws-fade-in 0.13s ease;
+}
+
+@keyframes ws-fade-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 .ws-dropdown__item {
@@ -136,9 +151,10 @@ $font-b: 'Manrope', sans-serif;
   cursor: pointer;
   text-decoration: none;
   text-align: left;
+  transition: background 0.1s;
 
-  &:hover { background: $bg-page; }
-
+  &:hover:not(:disabled) { background: $bg-page; }
+  &:disabled { opacity: 0.5; cursor: wait; }
   &--active { font-weight: 600; }
 }
 
@@ -158,11 +174,20 @@ $font-b: 'Manrope', sans-serif;
 
 .ws-dropdown__name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.ws-dropdown__check { color: $red; font-size: 14px; }
+.ws-dropdown__check { color: $red; font-size: 13px; flex-shrink: 0; }
 
-.ws-dropdown__divider { height: 1px; background: $border; margin: 2px 0; }
+.ws-dropdown__divider { height: 1px; background: $border; margin: 4px 0; }
 
-.ws-dropdown__manage { color: $gray; font-size: 12px; }
+.ws-dropdown__manage {
+  color: $gray;
+  font-size: 12px;
+
+  &:hover { color: $dark; }
+}
+
+.ws-dropdown__manage-icon { font-size: 13px; color: $gray-lt; flex-shrink: 0; }
+
+.ws-dropdown__empty { display: block; padding: 8px 12px; font-size: 12px; color: $gray-lt; }
 
 .workspace-icon {
   width: 28px;

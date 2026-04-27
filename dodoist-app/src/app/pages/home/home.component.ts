@@ -1,18 +1,19 @@
-import { Component, inject, signal, computed, OnInit } from '@angular/core';
+import { Component, computed, inject, OnDestroy, OnInit, signal } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { TuiIcon } from '@taiga-ui/core';
+import { toObservable } from '@angular/core/rxjs-interop';
+import { filter, forkJoin, Subscription, switchMap } from 'rxjs';
 import {
+  ActivityItem,
   DashboardService,
   DashboardStats,
-  TodayTask,
   ProjectSummary,
-  ActivityItem,
   SprintProgress,
+  TodayTask,
 } from '../../services/dashboard.service';
 import { UserService } from '../../services/user.service';
 import { TaskService } from '../../services/task.service';
-import { switchMap, of, EMPTY } from 'rxjs';
 
 @Component({
   selector: 'app-home',
@@ -21,12 +22,16 @@ import { switchMap, of, EMPTY } from 'rxjs';
   templateUrl: './home.component.html',
   styleUrl: './home.component.scss',
 })
-export class HomeComponent implements OnInit {
+export class HomeComponent implements OnInit, OnDestroy {
   private readonly dashboardService = inject(DashboardService);
   private readonly userService = inject(UserService);
   private readonly taskService = inject(TaskService);
 
+  private readonly workspace$ = toObservable(this.userService.currentWorkspace);
+  private sub?: Subscription;
+
   readonly today = new Date();
+  readonly isLoading = signal(false);
 
   readonly currentUserName = computed(
     () => this.userService.currentUser()?.display_name ?? '',
@@ -58,33 +63,46 @@ export class HomeComponent implements OnInit {
   );
 
   ngOnInit(): void {
-    const errorHandler = (err: unknown) => {
-      console.error('Dashboard load error', err);
-      this.loadError.set('Failed to load some dashboard data. Please refresh.');
-    };
-
-    this.userService.loadWorkspaces().pipe(
-      switchMap(workspaces => {
-        if (workspaces.length === 0) return EMPTY;
-        return this.dashboardService.getAllProjects(workspaces.map(w => w.slug));
+    this.sub = this.workspace$.pipe(
+      filter(Boolean),
+      switchMap(ws => {
+        this.isLoading.set(true);
+        this.loadError.set(null);
+        return forkJoin({
+          stats: this.dashboardService.getStats(),
+          todayTasks: this.dashboardService.getTodayTasks(),
+          projects: this.dashboardService.getProjectsForActiveWorkspace(ws.slug),
+          activity: this.dashboardService.getActivity(),
+        });
       }),
     ).subscribe({
-      next: projects => {
+      next: ({ stats, todayTasks, projects, activity }) => {
+        this.stats.set(stats);
+        this.todayTasks.set(todayTasks);
         this.projects.set(projects);
+        this.activity.set(activity);
+        this.isLoading.set(false);
+
         const first = projects[0];
         if (first) {
           this.dashboardService.getActiveSprint(first.id).subscribe({
             next: sprint => this.activeSprint.set(sprint),
-            error: errorHandler,
+            error: () => this.activeSprint.set(null),
           });
+        } else {
+          this.activeSprint.set(null);
         }
       },
-      error: errorHandler,
+      error: (err: unknown) => {
+        console.error('Dashboard load error', err);
+        this.loadError.set('Failed to load dashboard data. Please refresh.');
+        this.isLoading.set(false);
+      },
     });
+  }
 
-    this.dashboardService.getStats().subscribe({ next: s => this.stats.set(s), error: errorHandler });
-    this.dashboardService.getTodayTasks().subscribe({ next: t => this.todayTasks.set(t), error: errorHandler });
-    this.dashboardService.getActivity().subscribe({ next: a => this.activity.set(a), error: errorHandler });
+  ngOnDestroy(): void {
+    this.sub?.unsubscribe();
   }
 
   toggleTask(taskId: string): void {
