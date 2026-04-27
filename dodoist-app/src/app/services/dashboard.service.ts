@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, map } from 'rxjs';
+import { Observable, catchError, forkJoin, map, of, switchMap } from 'rxjs';
 import { environment } from '../../environments/environment';
 import { hexToRgba } from '../utils/color.util';
 
@@ -137,19 +137,41 @@ export class DashboardService {
     );
   }
 
+  /** Fetch projects from every workspace the user belongs to and flatten. */
+  getAllProjects(workspaceSlugs: string[]): Observable<ProjectSummary[]> {
+    if (workspaceSlugs.length === 0) return of([]);
+    return forkJoin(
+      workspaceSlugs.map(slug => this.getProjects(slug).pipe(catchError(() => of([])))),
+    ).pipe(map(results => results.flat()));
+  }
+
   getProjects(workspaceSlug: string): Observable<ProjectSummary[]> {
     return this.http
       .get<ApiProject[]>(`${environment.apiBase}/api/workspaces/${workspaceSlug}/projects/`)
       .pipe(
-        map(projects =>
-          projects.map(p => ({
-            id: p.id,
-            name: p.name,
-            color: p.color || '#6b7280',
-            progress: 0,
-            openTasks: 0,
-          })),
-        ),
+        switchMap(projects => {
+          if (projects.length === 0) return of([]);
+          return forkJoin(
+            projects.map(p =>
+              this.http
+                .get<{ progress: number; open_tasks: number }>(
+                  `${environment.apiBase}/api/projects/${p.id}/metrics/summary/`,
+                )
+                .pipe(
+                  map(s => ({
+                    id: p.id,
+                    name: p.name,
+                    color: p.color || '#6b7280',
+                    progress: s.progress,
+                    openTasks: s.open_tasks,
+                  })),
+                  catchError(() =>
+                    of({ id: p.id, name: p.name, color: p.color || '#6b7280', progress: 0, openTasks: 0 }),
+                  ),
+                ),
+            ),
+          );
+        }),
       );
   }
 

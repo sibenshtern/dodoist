@@ -34,8 +34,8 @@
   <!-- Tab nav -->
   <nav class="pd-tabs">
     @for (t of [
-      ['overview','Overview'],['sprints','Sprints'],['members','Members'],
-      ['labels','Labels'],['custom-fields','Fields'],['settings','Settings']
+      ['overview','Overview'],['tasks','Tasks'],['board','Board'],['sprints','Sprints'],
+      ['members','Members'],['labels','Labels'],['custom-fields','Fields'],['settings','Settings']
     ]; track t[0]) {
       <button
         class="pd-tab"
@@ -90,6 +90,131 @@
           </ul>
         </div>
       </div>
+    </div>
+  }
+
+  <!-- ── Tasks list ──────────────────────────────────────────────────────── -->
+  @if (activeTab() === 'tasks') {
+    <div class="pd-panel">
+      <div class="pd-panel-header">
+        <h2 class="pd-panel-title">Tasks ({{ tasks().length }})</h2>
+        <a class="btn-primary" [routerLink]="['/task/new']" [queryParams]="{ project: projectId() }">
+          <tui-icon icon="@tui.plus" /> New task
+        </a>
+      </div>
+
+      @if (tasksLoading()) {
+        <div class="pd-empty"><p>Loading tasks…</p></div>
+      } @else if (tasks().length === 0) {
+        <div class="pd-empty">
+          <tui-icon icon="@tui.check-square" class="pd-empty__icon" />
+          <p>No tasks yet.</p>
+        </div>
+      } @else {
+        <table class="pd-table pd-task-table">
+          <thead>
+            <tr>
+              <th>Title</th>
+              <th>Status</th>
+              <th>Priority</th>
+              <th>Assignee</th>
+              <th>Due</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (t of tasks(); track t.id) {
+              <tr class="pd-task-row" (click)="openTask(t.id)">
+                <td class="pd-task-row__title">
+                  <span class="pd-task-type">{{ t.type }}</span>
+                  {{ t.title }}
+                  @if (t.labels.length) {
+                    @for (lbl of t.labels; track lbl.id) {
+                      <span class="pd-task-label" [style.background]="lbl.color + '22'" [style.color]="lbl.color">{{ lbl.name }}</span>
+                    }
+                  }
+                </td>
+                <td>
+                  <span class="pd-status-chip pd-status-chip--{{ t.status }}">{{ t.status }}</span>
+                </td>
+                <td>
+                  <span class="pd-priority-dot" [style.background]="priorityColor(t.priority)"></span>
+                  {{ t.priority }}
+                </td>
+                <td>
+                  @if (t.assigned_to) {
+                    <span class="pd-avatar pd-avatar--sm" [title]="t.assigned_to.display_name">
+                      {{ assigneeInitial(t) }}
+                    </span>
+                  } @else {
+                    <span class="pd-muted">—</span>
+                  }
+                </td>
+                <td>
+                  @if (t.due_date) {
+                    <span [class.pd-overdue]="t.is_overdue">{{ formatDue(t.due_date) }}</span>
+                  } @else {
+                    <span class="pd-muted">—</span>
+                  }
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      }
+    </div>
+  }
+
+  <!-- ── Board ────────────────────────────────────────────────────────────── -->
+  @if (activeTab() === 'board') {
+    <div class="pd-panel pd-panel--board">
+      @if (tasksLoading()) {
+        <div class="pd-empty"><p>Loading board…</p></div>
+      } @else {
+        <div class="board-columns">
+          @for (col of STATUS_COLUMNS; track col.key) {
+            <div
+              class="board-col"
+              (dragover)="onDragOver($event)"
+              (drop)="onDrop(col.key)"
+            >
+              <div class="board-col__header">
+                <span class="board-col__dot" [style.background]="col.color"></span>
+                <span class="board-col__label">{{ col.label }}</span>
+                <span class="board-col__count">{{ tasksByStatus()[col.key].length }}</span>
+              </div>
+
+              <div class="board-col__body">
+                @for (t of tasksByStatus()[col.key]; track t.id) {
+                  <div
+                    class="board-card"
+                    draggable="true"
+                    (dragstart)="onDragStart(t.id)"
+                    (click)="openTask(t.id)"
+                  >
+                    <div class="board-card__title">{{ t.title }}</div>
+                    @if (t.labels.length) {
+                      <div class="board-card__labels">
+                        @for (lbl of t.labels; track lbl.id) {
+                          <span class="board-card__label" [style.background]="lbl.color + '22'" [style.color]="lbl.color">{{ lbl.name }}</span>
+                        }
+                      </div>
+                    }
+                    <div class="board-card__footer">
+                      <span class="board-card__priority" [style.color]="priorityColor(t.priority)">{{ t.priority }}</span>
+                      @if (t.due_date) {
+                        <span class="board-card__due" [class.board-card__due--overdue]="t.is_overdue">{{ formatDue(t.due_date) }}</span>
+                      }
+                      @if (t.assigned_to) {
+                        <span class="board-card__avatar" [title]="t.assigned_to.display_name">{{ assigneeInitial(t) }}</span>
+                      }
+                    </div>
+                  </div>
+                }
+              </div>
+            </div>
+          }
+        </div>
+      }
     </div>
   }
 

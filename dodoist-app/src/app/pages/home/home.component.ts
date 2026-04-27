@@ -12,7 +12,7 @@ import {
 } from '../../services/dashboard.service';
 import { UserService } from '../../services/user.service';
 import { TaskService } from '../../services/task.service';
-import { switchMap, of, EMPTY, shareReplay } from 'rxjs';
+import { switchMap, of, EMPTY } from 'rxjs';
 
 @Component({
   selector: 'app-home',
@@ -65,29 +65,22 @@ export class HomeComponent implements OnInit {
 
     this.userService.loadWorkspaces().pipe(
       switchMap(workspaces => {
-        const ws = workspaces.find(w => w.is_personal) ?? workspaces[0];
-        if (!ws) return EMPTY;
-
-        const projects$ = this.dashboardService.getProjects(ws.slug).pipe(shareReplay(1));
-
-        projects$.subscribe({
-          next: p => this.projects.set(p),
-          error: errorHandler,
-        });
-
-        projects$.pipe(
-          switchMap(projects => {
-            const first = projects[0];
-            return first ? this.dashboardService.getActiveSprint(first.id) : of(null);
-          }),
-        ).subscribe({
-          next: sprint => this.activeSprint.set(sprint),
-          error: errorHandler,
-        });
-
-        return EMPTY;
+        if (workspaces.length === 0) return EMPTY;
+        return this.dashboardService.getAllProjects(workspaces.map(w => w.slug));
       }),
-    ).subscribe({ error: errorHandler });
+    ).subscribe({
+      next: projects => {
+        this.projects.set(projects);
+        const first = projects[0];
+        if (first) {
+          this.dashboardService.getActiveSprint(first.id).subscribe({
+            next: sprint => this.activeSprint.set(sprint),
+            error: errorHandler,
+          });
+        }
+      },
+      error: errorHandler,
+    });
 
     this.dashboardService.getStats().subscribe({ next: s => this.stats.set(s), error: errorHandler });
     this.dashboardService.getTodayTasks().subscribe({ next: t => this.todayTasks.set(t), error: errorHandler });

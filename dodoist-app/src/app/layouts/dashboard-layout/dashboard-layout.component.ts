@@ -1,7 +1,7 @@
 import { Component, computed, inject, OnDestroy, OnInit, signal } from '@angular/core';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { TuiIcon } from '@taiga-ui/core';
-import { interval, Subscription, switchMap, EMPTY, shareReplay } from 'rxjs';
+import { interval, Subscription, switchMap, EMPTY } from 'rxjs';
 import { UserService } from '../../services/user.service';
 import { AuthService } from '../../services/auth.service';
 import { DashboardService, ProjectSummary } from '../../services/dashboard.service';
@@ -73,24 +73,15 @@ export class DashboardLayoutComponent implements OnInit, OnDestroy {
       this.userService.loadCurrentUser().subscribe({ error: console.error });
     }
 
-    if (!this.userService.currentWorkspace()) {
-      this.userService.loadWorkspaces().pipe(
-        switchMap(workspaces => {
-          const ws = workspaces.find(w => w.is_personal) ?? workspaces[0];
-          if (!ws) return EMPTY;
-          return this.dashboardService.getProjects(ws.slug).pipe(shareReplay(1));
-        }),
-      ).subscribe({
-        next: p => this.projects.set(p),
-        error: console.error,
-      });
-    } else {
-      const ws = this.userService.currentWorkspace()!;
-      this.dashboardService.getProjects(ws.slug).subscribe({
-        next: p => this.projects.set(p),
-        error: console.error,
-      });
-    }
+    this.userService.loadWorkspaces().pipe(
+      switchMap(workspaces => {
+        if (workspaces.length === 0) return EMPTY;
+        return this.dashboardService.getAllProjects(workspaces.map(w => w.slug));
+      }),
+    ).subscribe({
+      next: p => this.projects.set(p),
+      error: console.error,
+    });
 
     // Initial load + 60-second polling for notifications
     this.notifService.list({ limit: 50 }).subscribe({ error: console.error });

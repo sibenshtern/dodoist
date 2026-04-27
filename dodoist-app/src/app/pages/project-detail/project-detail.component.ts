@@ -1,5 +1,5 @@
 import { Component, OnInit, inject, signal, computed } from '@angular/core';
-import { ActivatedRoute, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { SlicePipe } from '@angular/common';
 import { TuiIcon } from '@taiga-ui/core';
@@ -7,10 +7,19 @@ import { ProjectsService, Project, ProjectMember } from '../../services/projects
 import { SprintsService, Sprint, SprintCreatePayload } from '../../services/sprints.service';
 import { LabelsService, Label } from '../../services/labels.service';
 import { CustomFieldsService, CustomField } from '../../services/custom-fields.service';
+import { TaskService, Task } from '../../services/task.service';
 import { UserService } from '../../services/user.service';
 import { switchMap, EMPTY } from 'rxjs';
 
-type Tab = 'overview' | 'sprints' | 'members' | 'labels' | 'custom-fields' | 'settings';
+type Tab = 'overview' | 'tasks' | 'board' | 'sprints' | 'members' | 'labels' | 'custom-fields' | 'settings';
+
+const STATUS_COLUMNS = [
+  { key: 'backlog',     label: 'Backlog',     color: '#94a3b8' },
+  { key: 'todo',        label: 'To Do',       color: '#64748b' },
+  { key: 'in_progress', label: 'In Progress', color: '#246fe0' },
+  { key: 'in_review',   label: 'In Review',   color: '#ff9800' },
+  { key: 'done',        label: 'Done',        color: '#299438' },
+];
 
 const FIELD_TYPES = ['text', 'number', 'date', 'boolean', 'select'] as const;
 
@@ -23,11 +32,13 @@ const FIELD_TYPES = ['text', 'number', 'date', 'boolean', 'select'] as const;
 })
 export class ProjectDetailComponent implements OnInit {
   private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
   private readonly fb = inject(FormBuilder);
   private readonly projectsService = inject(ProjectsService);
   private readonly sprintsService = inject(SprintsService);
   private readonly labelsService = inject(LabelsService);
   private readonly customFieldsService = inject(CustomFieldsService);
+  private readonly taskService = inject(TaskService);
   readonly userService = inject(UserService);
 
   readonly projectId = signal('');
@@ -36,8 +47,23 @@ export class ProjectDetailComponent implements OnInit {
   readonly sprints = signal<Sprint[]>([]);
   readonly labels = signal<Label[]>([]);
   readonly customFields = signal<CustomField[]>([]);
+  readonly tasks = signal<Task[]>([]);
+  readonly tasksLoading = signal(false);
   readonly isLoading = signal(true);
   readonly activeTab = signal<Tab>('overview');
+
+  readonly STATUS_COLUMNS = STATUS_COLUMNS;
+
+  readonly tasksByStatus = computed(() => {
+    const grouped: Record<string, Task[]> = {};
+    for (const col of STATUS_COLUMNS) grouped[col.key] = [];
+    for (const t of this.tasks()) {
+      if (grouped[t.status]) grouped[t.status].push(t);
+    }
+    return grouped;
+  });
+
+  private draggedTaskId: string | null = null;
 
   // Sprint dialog
   readonly showSprintDialog = signal(false);
@@ -155,7 +181,55 @@ export class ProjectDetailComponent implements OnInit {
     }
   }
 
-  setTab(tab: Tab): void { this.activeTab.set(tab); }
+  setTab(tab: Tab): void {
+    this.activeTab.set(tab);
+    if ((tab === 'tasks' || tab === 'board') && this.tasks().length === 0) {
+      this.loadTasks();
+    }
+  }
+
+  private loadTasks(): void {
+    this.tasksLoading.set(true);
+    this.taskService.getProjectTasks(this.projectId()).subscribe({
+      next: t => { this.tasks.set(t); this.tasksLoading.set(false); },
+      error: () => this.tasksLoading.set(false),
+    });
+  }
+
+  // ── Board drag-and-drop ───────────────────────────────────────────────────
+
+  onDragStart(taskId: string): void { this.draggedTaskId = taskId; }
+  onDragOver(event: DragEvent): void { event.preventDefault(); }
+
+  onDrop(targetStatus: string): void {
+    const id = this.draggedTaskId;
+    this.draggedTaskId = null;
+    if (!id) return;
+    const task = this.tasks().find(t => t.id === id);
+    if (!task || task.status === targetStatus) return;
+    this.tasks.update(ts => ts.map(t => t.id === id ? { ...t, status: targetStatus } : t));
+    this.taskService.updateTask(id, { status: targetStatus }).subscribe({
+      error: () => this.loadTasks(),
+    });
+  }
+
+  openTask(taskId: string): void { this.router.navigate(['/task', taskId]); }
+
+  priorityColor(priority: string): string {
+    const map: Record<string, string> = {
+      critical: '#db4035', high: '#ff9800', medium: '#a16207', low: '#299438', none: '#8a8680',
+    };
+    return map[priority] ?? '#8a8680';
+  }
+
+  formatDue(dateStr: string | null | undefined): string {
+    if (!dateStr) return '';
+    return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }
+
+  assigneeInitial(task: Task): string {
+    return task.assigned_to?.display_name[0]?.toUpperCase() ?? '?';
+  }
 
   // ── Sprints ─────────────────────────────────────────────────────────────────
 
