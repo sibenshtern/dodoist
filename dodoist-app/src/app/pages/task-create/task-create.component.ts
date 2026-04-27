@@ -1,4 +1,4 @@
-import { Component, inject, signal, OnInit } from '@angular/core';
+import { Component, inject, signal, computed, OnInit } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { RouterLink, Router } from '@angular/router';
 import { forkJoin, map, of, switchMap } from 'rxjs';
@@ -29,6 +29,7 @@ interface ProjectOption {
   id: string;
   name: string;
   color: string;
+  type: string;
 }
 interface MemberOption {
   id: string;
@@ -37,6 +38,7 @@ interface MemberOption {
 interface SprintOption {
   id: string;
   name: string;
+  status: string;
 }
 interface LabelOption {
   id: string;
@@ -82,6 +84,14 @@ export class TaskCreateComponent implements OnInit {
     { value: 'personal', label: 'Personal', emoji: '◎', bg: '#f0fdf4', color: '#15803d' },
   ];
 
+  readonly statuses = [
+    { value: 'backlog',     label: 'Backlog',      color: '#94a3b8' },
+    { value: 'todo',        label: 'To Do',        color: '#64748b' },
+    { value: 'in_progress', label: 'In Progress',  color: '#246fe0' },
+    { value: 'in_review',   label: 'In Review',    color: '#d97706' },
+    { value: 'done',        label: 'Done',         color: '#16a34a' },
+  ];
+
   readonly priorities: PriorityMeta[] = [
     { value: 'critical', label: 'Critical', emoji: '🔥', bg: '#fff0ef', color: '#db4035' },
     { value: 'high', label: 'High', emoji: '⬆', bg: '#fff7ed', color: '#c2610c' },
@@ -94,8 +104,17 @@ export class TaskCreateComponent implements OnInit {
   readonly members = signal<MemberOption[]>([]);
   readonly sprints = signal<SprintOption[]>([]);
   readonly labels = signal<LabelOption[]>([]);
+  readonly selectedProjectId = signal('');
   readonly isLoading = signal(false);
   readonly serverError = signal<string | null>(null);
+
+  readonly selectedProject = computed(() =>
+    this.projects().find(p => p.id === this.selectedProjectId()) ?? null,
+  );
+  readonly isScrum = computed(() => this.selectedProject()?.type === 'scrum');
+  readonly openSprints = computed(() =>
+    this.sprints().filter(s => s.status !== 'completed'),
+  );
 
   readonly selectedLabelIds = signal<string[]>([]);
   readonly descriptionJson = signal<unknown>(null);
@@ -110,6 +129,9 @@ export class TaskCreateComponent implements OnInit {
   readonly showParentDropdown = signal(false);
   private allProjectTasks: Task[] = [];
 
+  get currentStatus() {
+    return this.statuses.find(s => s.value === this.form.controls.status.value) ?? this.statuses[0];
+  }
   get currentType(): TypeMeta {
     return this.types.find((t) => t.value === this.form.controls.type.value)!;
   }
@@ -210,7 +232,9 @@ export class TaskCreateComponent implements OnInit {
         .getWorkspaceProjects(ws.slug)
         .subscribe((ps) =>
           this.projects.set(
-            ps.map((p) => ({ id: p.id, name: p.name, color: p.color || '#6b7280' })),
+            ps
+              .filter((p: any) => p.type !== 'personal')
+              .map((p: any) => ({ id: p.id, name: p.name, color: p.color || '#6b7280', type: p.type ?? '' })),
           ),
         );
       this.taskService
@@ -221,8 +245,11 @@ export class TaskCreateComponent implements OnInit {
     });
 
     this.form.controls.project_id.valueChanges.subscribe((projectId) => {
+      this.selectedProjectId.set(projectId);
       this.members.set([]);
       this.sprints.set([]);
+      this.form.controls.sprint_id.setValue('');
+      this.form.controls.story_points.setValue(null);
       this.clearParentTask();
       if (!projectId) return;
       this.taskService
@@ -232,7 +259,7 @@ export class TaskCreateComponent implements OnInit {
         );
       this.taskService
         .getProjectSprints(projectId)
-        .subscribe((ss) => this.sprints.set(ss.map((s) => ({ id: s.id, name: s.name }))));
+        .subscribe((ss) => this.sprints.set(ss.map((s) => ({ id: s.id, name: s.name, status: s.status ?? 'planned' }))));
       this.taskService
         .getProjectTasks(projectId)
         .subscribe((tasks) => { this.allProjectTasks = tasks; });

@@ -15,6 +15,16 @@ export interface Sprint {
   completed_at: string | null;
 }
 
+export interface SprintDetail extends Sprint {
+  task_stats: {
+    total: number;
+    completed: number;
+    in_progress: number;
+    total_story_points: number;
+    completed_story_points: number;
+  };
+}
+
 export interface SprintCreatePayload {
   name: string;
   goal?: string;
@@ -34,6 +44,12 @@ export class SprintsService {
   list(projectId: string): Observable<Sprint[]> {
     return this.http.get<Sprint[]>(
       `${environment.apiBase}/api/projects/${projectId}/sprints/`,
+    );
+  }
+
+  getDetail(sprintId: string): Observable<SprintDetail> {
+    return this.http.get<SprintDetail>(
+      `${environment.apiBase}/api/sprints/${sprintId}/`,
     );
   }
 
@@ -80,8 +96,7 @@ export class SprintsService {
 
   removeTask(sprintId: string, taskId: string): Observable<void> {
     return this.http.delete<void>(
-      `${environment.apiBase}/api/sprints/${sprintId}/tasks/`,
-      { body: { task_id: taskId } },
+      `${environment.apiBase}/api/sprints/${sprintId}/tasks/${taskId}/`,
     );
   }
 }

@@ -116,6 +116,18 @@
             </div>
           </div>
 
+          <div class="prop-row">
+            <span class="prop-name">Status</span>
+            <div class="prop-value">
+              <select class="prop-select prop-select--status" formControlName="status"
+                [style.border-left-color]="currentStatus.color">
+                @for (s of statuses; track s.value) {
+                  <option [value]="s.value">{{ s.label }}</option>
+                }
+              </select>
+            </div>
+          </div>
+
           <div class="block-prop">
             <span class="block-prop__label">Priority</span>
             <div class="badge-wrap">
@@ -153,31 +165,39 @@
         <div class="prop-group">
           <p class="prop-group__label">Planning</p>
 
-          <div class="prop-row">
-            <span class="prop-name">Sprint</span>
-            <div class="prop-value">
-              <select class="prop-select" formControlName="sprint_id">
-                <option value="">No sprint</option>
-                @for (s of sprints(); track s.id) {
-                  <option [value]="s.id">{{ s.name }}</option>
+          @if (isScrum()) {
+            <div class="prop-row">
+              <span class="prop-name">Sprint</span>
+              <div class="prop-value">
+                @if (!selectedProjectId()) {
+                  <span class="prop-hint">Select a project first</span>
+                } @else if (openSprints().length === 0) {
+                  <span class="prop-hint">No open sprints</span>
+                } @else {
+                  <select class="prop-select" formControlName="sprint_id">
+                    <option value="">No sprint</option>
+                    @for (s of openSprints(); track s.id) {
+                      <option [value]="s.id">{{ s.name }}</option>
+                    }
+                  </select>
                 }
-              </select>
+              </div>
             </div>
-          </div>
 
-          <div class="prop-row">
-            <span class="prop-name">Story pts</span>
-            <div class="prop-value">
-              <input
-                class="prop-input prop-input--short"
-                type="number"
-                formControlName="story_points"
-                min="0"
-                max="999"
-                placeholder="—"
-              />
+            <div class="prop-row">
+              <span class="prop-name">Story pts</span>
+              <div class="prop-value">
+                <input
+                  class="prop-input prop-input--short"
+                  type="number"
+                  formControlName="story_points"
+                  min="0"
+                  max="999"
+                  placeholder="—"
+                />
+              </div>
             </div>
-          </div>
+          }
 
           <div class="prop-row">
             <span class="prop-name">Start date</span>

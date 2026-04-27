@@ -336,6 +336,18 @@ $font-b: 'Manrope', sans-serif;
   cursor: pointer;
 
   option { color: $dark; background: $white; }
+
+  &--status {
+    border-left-width: 3px;
+    padding-left: 8px;
+    font-weight: 500;
+  }
+}
+
+.prop-hint {
+  font-size: 12px;
+  color: $gray-lt;
+  font-style: italic;
 }
 
 .prop-input--short { width: 72px; }

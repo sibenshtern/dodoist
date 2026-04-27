@@ -98,18 +98,52 @@
   @if (activeTab() === 'tasks') {
     <div class="pd-panel">
       <div class="pd-panel-header">
-        <h2 class="pd-panel-title">Tasks ({{ tasks().length }})</h2>
+        <h2 class="pd-panel-title">
+          Tasks
+          <span class="pd-count-badge">{{ tasks().length }}</span>
+        </h2>
         <a class="btn-primary" [routerLink]="['/task/new']" [queryParams]="{ project: projectId() }">
           <tui-icon icon="@tui.plus" /> New task
         </a>
       </div>
+
+      <!-- Filter toolbar -->
+      @if (!tasksLoading() && tasks().length > 0) {
+        <div class="tasks-toolbar">
+          <div class="status-filter">
+            <button class="status-filter__btn"
+              [class.status-filter__btn--active]="taskStatusFilter() === 'all'"
+              (click)="taskStatusFilter.set('all')">
+              All <span class="status-filter__count">{{ tasks().length }}</span>
+            </button>
+            @for (sf of availableStatusFilters(); track sf.key) {
+              <button class="status-filter__btn"
+                [class.status-filter__btn--active]="taskStatusFilter() === sf.key"
+                (click)="taskStatusFilter.set(sf.key)">
+                {{ sf.label }}
+                <span class="status-filter__count">{{ sf.count }}</span>
+              </button>
+            }
+          </div>
+          <input class="tasks-search"
+            [value]="taskSearch()"
+            (input)="taskSearch.set($any($event.target).value)"
+            placeholder="Search tasks…"
+            type="search" />
+        </div>
+      }
 
       @if (tasksLoading()) {
         <div class="pd-empty"><p>Loading tasks…</p></div>
       } @else if (tasks().length === 0) {
         <div class="pd-empty">
           <tui-icon icon="@tui.check-square" class="pd-empty__icon" />
-          <p>No tasks yet.</p>
+          <p>No tasks yet. Create the first one!</p>
+        </div>
+      } @else if (filteredTasks().length === 0) {
+        <div class="pd-empty pd-empty--compact">
+          <p>No tasks match the current filter.</p>
+          <button class="btn-secondary" style="font-size:12px;padding:5px 12px" (click)="clearTaskFilters()">Clear filters</button>
         </div>
       } @else {
         <table class="pd-table pd-task-table">
@@ -123,36 +157,44 @@
             </tr>
           </thead>
           <tbody>
-            @for (t of tasks(); track t.id) {
+            @for (t of filteredTasks(); track t.id) {
               <tr class="pd-task-row" (click)="openTask(t.id)">
-                <td class="pd-task-row__title">
-                  <span class="pd-task-type">{{ t.type }}</span>
-                  {{ t.title }}
-                  @if (t.labels.length) {
-                    @for (lbl of t.labels; track lbl.id) {
-                      <span class="pd-task-label" [style.background]="lbl.color + '22'" [style.color]="lbl.color">{{ lbl.name }}</span>
-                    }
+                <td class="pd-task-title-cell">
+                  <span class="pd-type-chip"
+                    [style.color]="typeColor(t.type)"
+                    [style.background]="typeBg(t.type)">
+                    {{ typeLabel(t.type) }}
+                  </span>
+                  <span class="pd-task-name">{{ t.title }}</span>
+                  @for (lbl of t.labels; track lbl.id) {
+                    <span class="pd-task-label" [style.background]="lbl.color + '22'" [style.color]="lbl.color">{{ lbl.name }}</span>
                   }
                 </td>
                 <td>
-                  <span class="pd-status-chip pd-status-chip--{{ t.status }}">{{ t.status }}</span>
+                  <span class="pd-status-chip pd-status-chip--{{ t.status }}">
+                    {{ statusLabel(t.status) }}
+                  </span>
                 </td>
                 <td>
-                  <span class="pd-priority-dot" [style.background]="priorityColor(t.priority)"></span>
-                  {{ t.priority }}
+                  <span class="pd-priority-pill pd-priority-pill--{{ t.priority }}">
+                    {{ priorityEmoji(t.priority) }} {{ priorityLabel(t.priority) }}
+                  </span>
                 </td>
                 <td>
                   @if (t.assigned_to) {
-                    <span class="pd-avatar pd-avatar--sm" [title]="t.assigned_to.display_name">
-                      {{ assigneeInitial(t) }}
-                    </span>
+                    <div class="pd-user-mini">
+                      <span class="pd-avatar pd-avatar--sm" [title]="t.assigned_to.display_name">
+                        {{ assigneeInitial(t) }}
+                      </span>
+                      <span class="pd-user-mini__name">{{ t.assigned_to.display_name }}</span>
+                    </div>
                   } @else {
                     <span class="pd-muted">—</span>
                   }
                 </td>
-                <td>
+                <td class="pd-due-cell">
                   @if (t.due_date) {
-                    <span [class.pd-overdue]="t.is_overdue">{{ formatDue(t.due_date) }}</span>
+                    <span [class.pd-overdue]="t.is_overdue && t.status !== 'done'">{{ formatDue(t.due_date) }}</span>
                   } @else {
                     <span class="pd-muted">—</span>
                   }
@@ -221,66 +263,158 @@
 
   <!-- ── Sprints ───────────────────────────────────────────────────────────── -->
   @if (activeTab() === 'sprints') {
-    <div class="pd-panel">
+    <div class="pd-panel pd-panel--sprints">
       <div class="pd-panel-header">
-        <h2 class="pd-panel-title">Sprints</h2>
+        <h2 class="pd-panel-title">Sprints &amp; Backlog</h2>
         <button class="btn-primary" (click)="openSprintDialog()">
           <tui-icon icon="@tui.plus" /> New sprint
         </button>
       </div>
 
-      @if (sprints().length === 0) {
+      @if (sprints().length === 0 && tasks().length === 0) {
         <div class="pd-empty">
           <tui-icon icon="@tui.zap" class="pd-empty__icon" />
-          <p>No sprints yet.</p>
+          <p>No sprints yet. Create one to start planning.</p>
         </div>
       } @else {
+
+        <!-- Active sprints -->
         @for (sprint of activeSprints(); track sprint.id) {
-          <div class="sprint-card sprint-card--active">
-            <div class="sprint-card__head">
-              <span class="sprint-card__name">{{ sprint.name }}</span>
-              <span class="sprint-badge sprint-badge--active">Active</span>
-              <button class="btn-sm btn-danger" (click)="openCompleteDialog(sprint)">Complete</button>
-            </div>
-            @if (sprint.goal) { <p class="sprint-card__goal">{{ sprint.goal }}</p> }
-            @if (sprint.start_date || sprint.end_date) {
-              <div class="sprint-card__dates">
-                {{ sprint.start_date ?? '?' }} → {{ sprint.end_date ?? '?' }}
-              </div>
-            }
-          </div>
-        }
-
-        @for (sprint of plannedSprints(); track sprint.id) {
-          <div class="sprint-card">
-            <div class="sprint-card__head">
-              <span class="sprint-card__name">{{ sprint.name }}</span>
-              <span class="sprint-badge">Planned</span>
-              <button class="btn-sm" (click)="startSprint(sprint)">Start</button>
-            </div>
-            @if (sprint.goal) { <p class="sprint-card__goal">{{ sprint.goal }}</p> }
-            @if (sprint.start_date || sprint.end_date) {
-              <div class="sprint-card__dates">
-                {{ sprint.start_date ?? '?' }} → {{ sprint.end_date ?? '?' }}
-              </div>
-            }
-          </div>
-        }
-
-        @if (completedSprints().length) {
-          <h3 class="pd-section-label">Completed ({{ completedSprints().length }})</h3>
-          @for (sprint of completedSprints(); track sprint.id) {
-            <div class="sprint-card sprint-card--done">
-              <div class="sprint-card__head">
-                <span class="sprint-card__name">{{ sprint.name }}</span>
-                <span class="sprint-badge sprint-badge--done">Completed</span>
-                @if (sprint.completed_at) {
-                  <span class="sprint-card__dates">{{ sprint.completed_at | slice:0:10 }}</span>
+          <div class="sprint-section sprint-section--active">
+            <div class="sprint-section__header">
+              <div class="sprint-section__meta">
+                <span class="sprint-badge sprint-badge--active">Active</span>
+                <span class="sprint-section__name">{{ sprint.name }}</span>
+                @if (sprint.start_date || sprint.end_date) {
+                  <span class="sprint-section__dates">{{ sprint.start_date ?? '?' }} → {{ sprint.end_date ?? '?' }}</span>
                 }
+                <span class="sprint-section__count">{{ sprintTasks(sprint.id).length }} tasks</span>
+              </div>
+              <button class="btn-sm btn-danger" (click)="openCompleteDialog(sprint)">Complete sprint</button>
+            </div>
+            @if (sprint.goal) { <p class="sprint-section__goal">{{ sprint.goal }}</p> }
+
+            <div class="sprint-task-list">
+              @if (sprintTasks(sprint.id).length === 0) {
+                <div class="sprint-task-empty">No tasks in this sprint yet. Move tasks from the backlog below.</div>
+              }
+              @for (t of sprintTasks(sprint.id); track t.id) {
+                <div class="sprint-task-row" (click)="openTask(t.id)">
+                  <span class="sprint-task-row__type-dot" [style.background]="typeColor(t.type)" title="{{ typeLabel(t.type) }}"></span>
+                  <span class="sprint-task-row__title">{{ t.title }}</span>
+                  @if (t.story_points) {
+                    <span class="sprint-task-row__sp" title="Story points">{{ t.story_points }}</span>
+                  }
+                  <span class="sprint-task-row__status" [attr.data-status]="t.status">{{ statusLabel(t.status) }}</span>
+                  @if (t.assigned_to) {
+                    <span class="sprint-task-row__avatar" [title]="t.assigned_to.display_name">{{ assigneeInitial(t) }}</span>
+                  }
+                  <button class="sprint-task-row__remove" title="Remove from sprint"
+                    (click)="removeFromSprint(t, sprint.id); $event.stopPropagation()">
+                    <tui-icon icon="@tui.x" />
+                  </button>
+                </div>
+              }
+            </div>
+          </div>
+        }
+
+        <!-- Planned sprints -->
+        @for (sprint of plannedSprints(); track sprint.id) {
+          <div class="sprint-section">
+            <div class="sprint-section__header">
+              <div class="sprint-section__meta">
+                <span class="sprint-badge">Planned</span>
+                <span class="sprint-section__name">{{ sprint.name }}</span>
+                @if (sprint.start_date || sprint.end_date) {
+                  <span class="sprint-section__dates">{{ sprint.start_date ?? '?' }} → {{ sprint.end_date ?? '?' }}</span>
+                }
+                <span class="sprint-section__count">{{ sprintTasks(sprint.id).length }} tasks</span>
+              </div>
+              <button class="btn-sm" (click)="startSprint(sprint)">Start sprint</button>
+            </div>
+            @if (sprint.goal) { <p class="sprint-section__goal">{{ sprint.goal }}</p> }
+
+            <div class="sprint-task-list">
+              @if (sprintTasks(sprint.id).length === 0) {
+                <div class="sprint-task-empty">No tasks yet. Move tasks from the backlog below.</div>
+              }
+              @for (t of sprintTasks(sprint.id); track t.id) {
+                <div class="sprint-task-row" (click)="openTask(t.id)">
+                  <span class="sprint-task-row__type-dot" [style.background]="typeColor(t.type)" title="{{ typeLabel(t.type) }}"></span>
+                  <span class="sprint-task-row__title">{{ t.title }}</span>
+                  @if (t.story_points) {
+                    <span class="sprint-task-row__sp" title="Story points">{{ t.story_points }}</span>
+                  }
+                  <span class="sprint-task-row__status" [attr.data-status]="t.status">{{ statusLabel(t.status) }}</span>
+                  @if (t.assigned_to) {
+                    <span class="sprint-task-row__avatar" [title]="t.assigned_to.display_name">{{ assigneeInitial(t) }}</span>
+                  }
+                  <button class="sprint-task-row__remove" title="Remove from sprint"
+                    (click)="removeFromSprint(t, sprint.id); $event.stopPropagation()">
+                    <tui-icon icon="@tui.x" />
+                  </button>
+                </div>
+              }
+            </div>
+          </div>
+        }
+
+        <!-- Completed sprints (collapsed summary) -->
+        @if (completedSprints().length) {
+          <div class="sprint-section sprint-section--done">
+            <div class="sprint-section__header">
+              <div class="sprint-section__meta">
+                <span class="sprint-badge sprint-badge--done">Completed</span>
+                <span class="sprint-section__name">{{ completedSprints().length }} completed sprint{{ completedSprints().length > 1 ? 's' : '' }}</span>
               </div>
             </div>
-          }
+          </div>
         }
+
+        <!-- Backlog -->
+        <div class="sprint-section sprint-section--backlog">
+          <div class="sprint-section__header">
+            <div class="sprint-section__meta">
+              <span class="sprint-badge sprint-badge--backlog">Backlog</span>
+              <span class="sprint-section__name">Unscheduled tasks</span>
+              <span class="sprint-section__count">{{ backlogTasks().length }} tasks</span>
+            </div>
+          </div>
+
+          <div class="sprint-task-list">
+            @if (tasksLoading()) {
+              <div class="sprint-task-empty">Loading tasks…</div>
+            } @else if (backlogTasks().length === 0) {
+              <div class="sprint-task-empty">All tasks are assigned to sprints.</div>
+            }
+            @for (t of backlogTasks(); track t.id) {
+              <div class="sprint-task-row sprint-task-row--backlog" (click)="openTask(t.id)">
+                <span class="sprint-task-row__type-dot" [style.background]="typeColor(t.type)" title="{{ typeLabel(t.type) }}"></span>
+                <span class="sprint-task-row__priority-dot" [style.background]="priorityColor(t.priority)" title="{{ priorityLabel(t.priority) }}"></span>
+                <span class="sprint-task-row__title">{{ t.title }}</span>
+                @if (t.story_points) {
+                  <span class="sprint-task-row__sp" title="Story points">{{ t.story_points }}</span>
+                }
+                @if (t.assigned_to) {
+                  <span class="sprint-task-row__avatar" [title]="t.assigned_to.display_name">{{ assigneeInitial(t) }}</span>
+                }
+                <div class="sprint-task-row__assign" (click)="$event.stopPropagation()">
+                  @if (sprints().length > 0) {
+                    <select class="sprint-assign-select"
+                      (change)="assignToSprint(t, $any($event.target).value); $any($event.target).value = ''">
+                      <option value="">+ Add to sprint</option>
+                      @for (s of assignableSprintsFor(t); track s.id) {
+                        <option [value]="s.id">{{ s.name }}</option>
+                      }
+                    </select>
+                  }
+                </div>
+              </div>
+            }
+          </div>
+        </div>
+
       }
     </div>
   }
@@ -462,9 +596,11 @@
               [series]="burndownSeries()"
               [chart]="burndownChart"
               [xaxis]="burndownXaxis()"
+              [yaxis]="burndownYaxis"
               [stroke]="burndownStroke"
               [fill]="burndownFill"
               [colors]="burndownColors"
+              [grid]="chartGrid"
               [tooltip]="chartTooltip"
               [dataLabels]="chartDataLabels"
               [legend]="chartLegend"
@@ -485,8 +621,10 @@
               [series]="velocitySeries()"
               [chart]="velocityChart"
               [xaxis]="velocityXaxis()"
+              [yaxis]="velocityYaxis"
               [colors]="velocityColors"
               [plotOptions]="velocityPlotOptions"
+              [grid]="chartGrid"
               [dataLabels]="chartDataLabels"
               [tooltip]="chartTooltip"
             ></apx-chart>

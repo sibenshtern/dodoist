@@ -29,6 +29,7 @@ export interface Task {
   assigned_to: TaskUser | null;
   created_by: TaskUser;
   labels: TaskLabel[];
+  sprint: string | null;
 }
 
 export interface TaskDetail extends Task {
@@ -105,7 +106,19 @@ export class TaskService {
     return this.http.get<Task[]>(`${environment.apiBase}/api/tasks/my/`, { params });
   }
 
-  updateTask(taskId: string, patch: Partial<Pick<Task, 'status' | 'priority'>> & { title?: string; assigned_to_id?: string | null; description?: unknown }): Observable<Task> {
+  updateTask(taskId: string, patch: {
+    status?: string;
+    priority?: string;
+    title?: string;
+    type?: string;
+    assigned_to_id?: string | null;
+    description?: unknown;
+    story_points?: number | null;
+    due_date?: string | null;
+    start_date?: string | null;
+    is_private?: boolean;
+    reminder_at?: string | null;
+  }): Observable<Task> {
     return this.http.patch<Task>(`${environment.apiBase}/api/tasks/${taskId}/`, patch);
   }
 
@@ -117,6 +130,12 @@ export class TaskService {
     return this.http.post<void>(
       `${environment.apiBase}/api/tasks/${taskId}/labels/`,
       { label_id: labelId },
+    );
+  }
+
+  removeLabel(taskId: string, labelId: string): Observable<void> {
+    return this.http.delete<void>(
+      `${environment.apiBase}/api/tasks/${taskId}/labels/${labelId}/`,
     );
   }
 
@@ -197,7 +216,7 @@ export class TaskService {
   }
 
   getProjectSprints(projectId: string): Observable<any[]> {
-    return this.http.get<any[]>(`${environment.apiBase}/api/projects/${projectId}/sprints/?status=active,planned`);
+    return this.http.get<any[]>(`${environment.apiBase}/api/projects/${projectId}/sprints/`);
   }
 
   getProjectTasks(projectId: string): Observable<Task[]> {

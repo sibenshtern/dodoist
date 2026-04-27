@@ -35,9 +35,12 @@
           @if (t.is_overdue && t.status !== 'done') {
             <span class="overdue-badge">Overdue</span>
           }
+          @if (t.is_private) {
+            <span class="private-badge">Private</span>
+          }
         </div>
 
-        <!-- Meta row -->
+        <!-- Meta row: Status + Priority only -->
         <div class="meta-row">
           <!-- Status dropdown -->
           <div class="meta-field">
@@ -70,51 +73,20 @@
               }
             </select>
           </div>
-
-          <!-- Assignee -->
-          <div class="meta-field">
-            <span class="meta-label">Assignee</span>
-            @if (t.assigned_to) {
-              <div class="assignee-chip">
-                <span class="assignee-avatar">{{ initials(t.assigned_to.display_name) }}</span>
-                <span class="assignee-name">{{ t.assigned_to.display_name }}</span>
-                @if (t.assigned_to.id !== currentUserId()) {
-                  <button class="assign-me-btn" (click)="assignToMe()" title="Reassign to me">→ me</button>
-                }
-              </div>
-            } @else {
-              <button class="assign-me-btn assign-me-btn--standalone" (click)="assignToMe()">Assign to me</button>
-            }
-          </div>
-
-          <!-- Due date -->
-          @if (t.due_date) {
-            <div class="meta-field">
-              <span class="meta-label">Due</span>
-              <span
-                class="due-value"
-                [class.due-value--overdue]="t.is_overdue && t.status !== 'done'"
-              >{{ formatDate(t.due_date) }}</span>
-            </div>
-          }
-
-          <!-- Story points -->
-          @if (t.story_points !== null) {
-            <div class="meta-field">
-              <span class="meta-label">Points</span>
-              <span class="meta-value">{{ t.story_points }} pts</span>
-            </div>
-          }
         </div>
 
         <!-- Labels -->
-        @if (t.labels?.length) {
-          <div class="labels-row">
-            @for (label of t.labels; track label.id) {
-              <span class="label-chip" [style.color]="label.color">{{ label.name }}</span>
-            }
-          </div>
-        }
+        <div class="labels-row">
+          @for (label of t.labels; track label.id) {
+            <span class="label-chip" [style.color]="label.color">
+              {{ label.name }}
+              <button class="label-chip__remove" (click)="removeLabelFromTask(label.id)" title="Remove label">✕</button>
+            </span>
+          }
+          @if (!t.labels?.length) {
+            <span class="labels-empty">No labels</span>
+          }
+        </div>
 
         <!-- Description -->
         <section class="section">
@@ -325,13 +297,183 @@
 
       </div>
 
-      <!-- ── Right sidebar: task info ───────────────────────────────── -->
+      <!-- ── Right sidebar ───────────────────────────────────────────── -->
       <aside class="info-sidebar">
+
+        <!-- Properties -->
+        <section class="info-section">
+          <h4 class="info-section__title">Properties</h4>
+          <div class="prop-list">
+
+            <!-- Assignee -->
+            <div class="prop-row">
+              <span class="prop-label">Assignee</span>
+              <div class="prop-value-cell">
+                @if (editingField() === 'assignee') {
+                  <select class="prop-select"
+                    (change)="saveAssignee($any($event.target).value)"
+                    (blur)="editingField.set(null)"
+                    autofocus>
+                    <option value="">— Unassigned —</option>
+                    @for (m of projectMembers(); track m.user.id) {
+                      <option [value]="m.user.id" [selected]="t.assigned_to?.id === m.user.id">
+                        {{ m.user.display_name }}
+                      </option>
+                    }
+                  </select>
+                } @else {
+                  <button class="prop-value" (click)="editingField.set('assignee')">
+                    @if (t.assigned_to) {
+                      <span class="prop-avatar">{{ initials(t.assigned_to.display_name) }}</span>
+                      {{ t.assigned_to.display_name }}
+                    } @else {
+                      <span class="prop-empty">Unassigned</span>
+                    }
+                  </button>
+                }
+              </div>
+            </div>
+
+            <!-- Type -->
+            <div class="prop-row">
+              <span class="prop-label">Type</span>
+              <div class="prop-value-cell">
+                @if (editingField() === 'type') {
+                  <select class="prop-select"
+                    (change)="saveType($any($event.target).value)"
+                    (blur)="editingField.set(null)"
+                    autofocus>
+                    @for (tp of typeOptions; track tp) {
+                      <option [value]="tp" [selected]="t.type === tp">{{ TYPE_META[tp].label }}</option>
+                    }
+                  </select>
+                } @else {
+                  <button class="prop-value" (click)="editingField.set('type')">
+                    <span class="type-chip"
+                      [style.color]="TYPE_META[t.type]?.color"
+                      [style.background]="TYPE_META[t.type]?.bg">
+                      {{ TYPE_META[t.type]?.label ?? t.type }}
+                    </span>
+                  </button>
+                }
+              </div>
+            </div>
+
+            <!-- Story Points -->
+            <div class="prop-row">
+              <span class="prop-label">Points</span>
+              <div class="prop-value-cell">
+                @if (editingField() === 'story_points') {
+                  <input class="prop-input" type="number" min="0" max="999"
+                    [value]="t.story_points ?? ''"
+                    (keydown.enter)="saveStoryPoints($any($event.target).value)"
+                    (keydown.escape)="editingField.set(null)"
+                    (blur)="saveStoryPoints($any($event.target).value)"
+                    autofocus />
+                } @else {
+                  <button class="prop-value" (click)="editingField.set('story_points')">
+                    @if (t.story_points !== null) {
+                      {{ t.story_points }} pts
+                    } @else {
+                      <span class="prop-empty">Not set</span>
+                    }
+                  </button>
+                }
+              </div>
+            </div>
+
+            <!-- Due date -->
+            <div class="prop-row">
+              <span class="prop-label">Due</span>
+              <div class="prop-value-cell">
+                @if (editingField() === 'due_date') {
+                  <input class="prop-input" type="date"
+                    [value]="t.due_date ?? ''"
+                    (change)="saveDueDate($any($event.target).value)"
+                    (keydown.escape)="editingField.set(null)"
+                    (blur)="editingField.set(null)"
+                    autofocus />
+                } @else {
+                  <button class="prop-value"
+                    [class.prop-value--overdue]="t.is_overdue && t.status !== 'done'"
+                    (click)="editingField.set('due_date')">
+                    @if (t.due_date) {
+                      {{ formatDate(t.due_date) }}
+                    } @else {
+                      <span class="prop-empty">Not set</span>
+                    }
+                  </button>
+                }
+              </div>
+            </div>
+
+            <!-- Start date -->
+            <div class="prop-row">
+              <span class="prop-label">Start</span>
+              <div class="prop-value-cell">
+                @if (editingField() === 'start_date') {
+                  <input class="prop-input" type="date"
+                    [value]="t.start_date ?? ''"
+                    (change)="saveStartDate($any($event.target).value)"
+                    (keydown.escape)="editingField.set(null)"
+                    (blur)="editingField.set(null)"
+                    autofocus />
+                } @else {
+                  <button class="prop-value" (click)="editingField.set('start_date')">
+                    @if (t.start_date) {
+                      {{ formatDate(t.start_date) }}
+                    } @else {
+                      <span class="prop-empty">Not set</span>
+                    }
+                  </button>
+                }
+              </div>
+            </div>
+
+            <!-- Visibility -->
+            <div class="prop-row prop-row--last">
+              <span class="prop-label">Visibility</span>
+              <div class="prop-value-cell">
+                <button class="prop-value" (click)="togglePrivate()">
+                  <span class="visibility-chip" [class.visibility-chip--private]="t.is_private">
+                    {{ t.is_private ? 'Private' : 'Public' }}
+                  </span>
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </section>
+
+        <!-- Sprint selector -->
+        @if (sprints().length > 0) {
+          <section class="info-section">
+            <h4 class="info-section__title">Sprint</h4>
+            <select
+              class="sidebar-select"
+              [disabled]="sprintChanging()"
+              (change)="changeSprint($any($event.target).value)"
+            >
+              <option value="">— No sprint —</option>
+              @for (s of sprints(); track s.id) {
+                @if (s.status !== 'completed') {
+                  <option [value]="s.id" [selected]="t.sprint === s.id">
+                    {{ s.name }}
+                    @if (s.status === 'active') { · Active }
+                  </option>
+                }
+              }
+            </select>
+            @if (isSprintCompleted(t.sprint)) {
+              <p class="sidebar-hint">Currently in a completed sprint: {{ sprintName(t.sprint) }}</p>
+            }
+          </section>
+        }
+
+        <!-- Details (read-only metadata) -->
         <section class="info-section">
           <h4 class="info-section__title">Details</h4>
           <dl class="info-list">
-            <dt>Type</dt>
-            <dd>{{ t.type }}</dd>
             <dt>Created by</dt>
             <dd>{{ t.created_by?.display_name }}</dd>
             <dt>Created</dt>
@@ -340,12 +482,9 @@
               <dt>Completed</dt>
               <dd>{{ formatDate(t.completed_at) }}</dd>
             }
-            @if (t.start_date) {
-              <dt>Start date</dt>
-              <dd>{{ formatDate(t.start_date) }}</dd>
-            }
           </dl>
         </section>
+
       </aside>
 
     </div>

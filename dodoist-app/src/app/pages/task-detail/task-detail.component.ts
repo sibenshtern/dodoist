@@ -10,6 +10,7 @@ import {
   ActivityLogEntry,
 } from '../../services/task.service';
 import { AttachmentsService, Attachment } from '../../services/attachments.service';
+import { SprintsService, Sprint } from '../../services/sprints.service';
 import { ToastService } from '../../services/toast.service';
 import { UserService } from '../../services/user.service';
 import { RichEditorComponent } from '../../components/rich-editor/rich-editor.component';
@@ -17,12 +18,12 @@ import { RichEditorComponent } from '../../components/rich-editor/rich-editor.co
 type ActiveTab = 'comments' | 'activity' | 'time-logs' | 'attachments';
 
 const STATUS_META: Record<string, { label: string; color: string; bg: string }> = {
-  backlog: { label: 'Backlog', color: '#8a8680', bg: '#f0eee9' },
-  todo: { label: 'To Do', color: '#64748b', bg: '#f1f5f9' },
+  backlog:     { label: 'Backlog',     color: '#8a8680', bg: '#f0eee9' },
+  todo:        { label: 'To Do',       color: '#64748b', bg: '#f1f5f9' },
   in_progress: { label: 'In Progress', color: '#246fe0', bg: '#ebf2fd' },
-  in_review: { label: 'In Review', color: '#ff9800', bg: '#fff7ed' },
-  done: { label: 'Done', color: '#299438', bg: '#f0fdf4' },
-  cancelled: { label: 'Cancelled', color: '#8a8680', bg: '#f0eee9' },
+  in_review:   { label: 'In Review',   color: '#ff9800', bg: '#fff7ed' },
+  done:        { label: 'Done',        color: '#299438', bg: '#f0fdf4' },
+  cancelled:   { label: 'Cancelled',   color: '#8a8680', bg: '#f0eee9' },
 };
 
 const PRIORITY_META: Record<string, { label: string; color: string; bg: string; emoji: string }> = {
@@ -31,6 +32,14 @@ const PRIORITY_META: Record<string, { label: string; color: string; bg: string; 
   medium:   { label: 'Medium',   color: '#a16207', bg: '#fefce8', emoji: '▶' },
   low:      { label: 'Low',      color: '#15803d', bg: '#f0fdf4', emoji: '⬇' },
   none:     { label: 'None',     color: '#8a8680', bg: '#f0eee9', emoji: '—' },
+};
+
+const TYPE_META: Record<string, { label: string; color: string; bg: string }> = {
+  task:     { label: 'Task',     color: '#64748b', bg: '#f1f5f9' },
+  bug:      { label: 'Bug',      color: '#db4035', bg: '#fff0ef' },
+  story:    { label: 'Story',    color: '#7c3aed', bg: '#f5f3ff' },
+  epic:     { label: 'Epic',     color: '#c2610c', bg: '#fff7ed' },
+  personal: { label: 'Personal', color: '#15803d', bg: '#f0fdf4' },
 };
 
 @Component({
@@ -45,6 +54,7 @@ export class TaskDetailComponent implements OnInit {
   private readonly router = inject(Router);
   private readonly taskService = inject(TaskService);
   private readonly attachmentsService = inject(AttachmentsService);
+  private readonly sprintsService = inject(SprintsService);
   private readonly toast = inject(ToastService);
   private readonly userService = inject(UserService);
   private readonly fb = inject(FormBuilder);
@@ -54,19 +64,25 @@ export class TaskDetailComponent implements OnInit {
   readonly timeLogs = signal<TimeLog[]>([]);
   readonly activity = signal<ActivityLogEntry[]>([]);
   readonly attachments = signal<Attachment[]>([]);
+  readonly sprints = signal<Sprint[]>([]);
+  readonly sprintChanging = signal(false);
+  readonly projectMembers = signal<{ user: { id: string; display_name: string; email: string }; role: string }[]>([]);
   readonly isLoading = signal(true);
   readonly activeTab = signal<ActiveTab>('comments');
   readonly totalMinutes = signal(0);
   readonly isDragging = signal(false);
   readonly isUploading = signal(false);
+  readonly editingField = signal<string | null>(null);
 
   readonly AttachmentsService = this.attachmentsService;
 
   readonly STATUS_META = STATUS_META;
   readonly PRIORITY_META = PRIORITY_META;
+  readonly TYPE_META = TYPE_META;
 
   readonly statusOptions = Object.keys(STATUS_META);
   readonly priorityOptions = Object.keys(PRIORITY_META);
+  readonly typeOptions = Object.keys(TYPE_META);
 
   readonly commentForm = this.fb.nonNullable.group({ body: [''] });
   readonly timeLogForm = this.fb.nonNullable.group({
@@ -112,6 +128,14 @@ export class TaskDetailComponent implements OnInit {
         this.isLoading.set(false);
         this.loadComments(id);
         this.loadAttachments(id);
+        this.sprintsService.list(task.project).subscribe({
+          next: sprints => this.sprints.set(sprints),
+          error: () => {},
+        });
+        this.taskService.getProjectMembers(task.project).subscribe({
+          next: members => this.projectMembers.set(members),
+          error: () => {},
+        });
       },
       error: () => {
         this.isLoading.set(false);
@@ -234,6 +258,118 @@ export class TaskDetailComponent implements OnInit {
       error: () => {
         this.task.set({ ...task, priority: prev });
         this.toast.error('Failed to update priority.');
+      },
+    });
+  }
+
+  // ── Properties panel ─────────────────────────────────────────────────────
+
+  saveAssignee(userId: string): void {
+    const task = this.task();
+    if (!task) return;
+    this.editingField.set(null);
+    const newId = userId || null;
+    if (newId === (task.assigned_to?.id ?? null)) return;
+    const prevAssignee = task.assigned_to;
+    const member = newId ? this.projectMembers().find(m => m.user.id === newId) : null;
+    const newAssignee = member
+      ? { id: member.user.id, display_name: member.user.display_name, email: member.user.email }
+      : null;
+    this.task.set({ ...task, assigned_to: newAssignee });
+    this.taskService.updateTask(task.id, { assigned_to_id: newId }).subscribe({
+      error: () => {
+        this.task.set({ ...task, assigned_to: prevAssignee });
+        this.toast.error('Failed to update assignee.');
+      },
+    });
+  }
+
+  saveType(newType: string): void {
+    const task = this.task();
+    if (!task) return;
+    this.editingField.set(null);
+    if (newType === task.type) return;
+    const prev = task.type;
+    this.task.set({ ...task, type: newType });
+    this.taskService.updateTask(task.id, { type: newType }).subscribe({
+      error: () => {
+        this.task.set({ ...task, type: prev });
+        this.toast.error('Failed to update type.');
+      },
+    });
+  }
+
+  saveStoryPoints(value: string): void {
+    const task = this.task();
+    if (!task) return;
+    this.editingField.set(null);
+    const newPoints = value === '' ? null : parseInt(value, 10);
+    if (value !== '' && isNaN(newPoints as number)) return;
+    if (newPoints === task.story_points) return;
+    const prev = task.story_points;
+    this.task.set({ ...task, story_points: newPoints });
+    this.taskService.updateTask(task.id, { story_points: newPoints }).subscribe({
+      error: () => {
+        this.task.set({ ...task, story_points: prev });
+        this.toast.error('Failed to update story points.');
+      },
+    });
+  }
+
+  saveDueDate(value: string): void {
+    const task = this.task();
+    if (!task) return;
+    this.editingField.set(null);
+    const newDate = value || null;
+    if (newDate === task.due_date) return;
+    const prev = task.due_date;
+    this.task.set({ ...task, due_date: newDate });
+    this.taskService.updateTask(task.id, { due_date: newDate }).subscribe({
+      error: () => {
+        this.task.set({ ...task, due_date: prev });
+        this.toast.error('Failed to update due date.');
+      },
+    });
+  }
+
+  saveStartDate(value: string): void {
+    const task = this.task();
+    if (!task) return;
+    this.editingField.set(null);
+    const newDate = value || null;
+    if (newDate === task.start_date) return;
+    const prev = task.start_date;
+    this.task.set({ ...task, start_date: newDate });
+    this.taskService.updateTask(task.id, { start_date: newDate }).subscribe({
+      error: () => {
+        this.task.set({ ...task, start_date: prev });
+        this.toast.error('Failed to update start date.');
+      },
+    });
+  }
+
+  togglePrivate(): void {
+    const task = this.task();
+    if (!task) return;
+    const newVal = !task.is_private;
+    this.task.set({ ...task, is_private: newVal });
+    this.taskService.updateTask(task.id, { is_private: newVal }).subscribe({
+      error: () => {
+        this.task.set({ ...task, is_private: !newVal });
+        this.toast.error('Failed to update visibility.');
+      },
+    });
+  }
+
+  removeLabelFromTask(labelId: string): void {
+    const task = this.task();
+    if (!task) return;
+    const prev = task.labels;
+    this.task.set({ ...task, labels: task.labels.filter(l => l.id !== labelId) });
+    this.taskService.removeLabel(task.id, labelId).subscribe({
+      error: () => {
+        this.task.set({ ...task, labels: prev });
+        this.toast.error('Failed to remove label.');
       },
     });
   }
@@ -414,6 +550,42 @@ export class TaskDetailComponent implements OnInit {
 
   isOwnAttachment(attachment: Attachment): boolean {
     return attachment.uploaded_by.id === this.currentUserId();
+  }
+
+  // ── Sprint ───────────────────────────────────────────────────────────────
+
+  changeSprint(newSprintId: string): void {
+    const task = this.task();
+    if (!task || this.sprintChanging()) return;
+    const prevSprintId = task.sprint;
+    if (newSprintId === (prevSprintId ?? '')) return;
+
+    this.sprintChanging.set(true);
+    this.task.set({ ...task, sprint: newSprintId || null });
+
+    const request$ = newSprintId
+      ? this.sprintsService.addTask(newSprintId, task.id)
+      : this.sprintsService.removeTask(prevSprintId!, task.id);
+
+    request$.subscribe({
+      next: () => this.sprintChanging.set(false),
+      error: () => {
+        this.task.set({ ...task, sprint: prevSprintId });
+        this.sprintChanging.set(false);
+        this.toast.error('Failed to update sprint.');
+      },
+    });
+  }
+
+  sprintName(sprintId: string | null): string {
+    if (!sprintId) return '—';
+    return this.sprints().find(s => s.id === sprintId)?.name ?? '—';
+  }
+
+  isSprintCompleted(sprintId: string | null): boolean {
+    if (!sprintId) return false;
+    const sprint = this.sprints().find(s => s.id === sprintId);
+    return !sprint || sprint.status === 'completed';
   }
 
   // ── Reactions ────────────────────────────────────────────────────────────

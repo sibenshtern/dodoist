@@ -4,24 +4,26 @@ import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { SlicePipe, DecimalPipe } from '@angular/common';
 import { TuiIcon } from '@taiga-ui/core';
 import { ProjectsService, Project, ProjectMember } from '../../services/projects.service';
-import { SprintsService, Sprint, SprintCreatePayload } from '../../services/sprints.service';
+import { SprintsService, Sprint, SprintDetail, SprintCreatePayload } from '../../services/sprints.service';
 import { LabelsService, Label } from '../../services/labels.service';
 import { CustomFieldsService, CustomField } from '../../services/custom-fields.service';
 import { TaskService, Task } from '../../services/task.service';
 import { UserService } from '../../services/user.service';
 import { AnalyticsService, ProjectSummary, MemberMetric, TaskSnapshot } from '../../services/analytics.service';
-import { switchMap, EMPTY, forkJoin, catchError, of } from 'rxjs';
+import { switchMap, EMPTY, forkJoin, catchError, of, map } from 'rxjs';
 import { ChartComponent } from 'ng-apexcharts';
 import type {
   ApexAxisChartSeries,
   ApexChart,
   ApexXAxis,
+  ApexYAxis,
   ApexStroke,
   ApexFill,
   ApexTooltip,
   ApexDataLabels,
   ApexPlotOptions,
   ApexLegend,
+  ApexGrid,
 } from 'ng-apexcharts';
 
 type Tab = 'overview' | 'tasks' | 'board' | 'sprints' | 'members' | 'labels' | 'custom-fields' | 'settings' | 'analytics';
@@ -131,20 +133,110 @@ export class ProjectDetailComponent implements OnInit {
   readonly velocityXaxis = signal<ApexXAxis>({});
 
   // Readonly chart config (does not change)
-  readonly burndownChart: ApexChart = { type: 'area', height: 300, toolbar: { show: false } };
+  // type:'line' is required for mixed line+area series — 'area' ignores per-series type overrides
+  readonly burndownChart: ApexChart = { type: 'line', height: 300, toolbar: { show: false }, fontFamily: 'Manrope, sans-serif' };
   readonly burndownStroke: ApexStroke = { curve: 'smooth', width: [2, 2] };
-  readonly burndownFill: ApexFill = { type: ['solid', 'gradient'], opacity: [0, 0.15] };
+  readonly burndownFill: ApexFill = {
+    type: ['solid', 'gradient'],
+    gradient: { shadeIntensity: 1, opacityFrom: 0.28, opacityTo: 0.02, stops: [0, 90, 100] },
+  };
   readonly burndownColors = ['#b0aea9', '#246fe0'];
-  readonly velocityChart: ApexChart = { type: 'bar', height: 260, toolbar: { show: false } };
+  readonly burndownYaxis: ApexYAxis = {
+    min: 0,
+    labels: { formatter: (v: number) => Math.round(v).toString(), style: { fontFamily: 'Manrope, sans-serif', fontSize: '11px' } },
+  };
+  readonly velocityChart: ApexChart = { type: 'bar', height: 280, toolbar: { show: false }, fontFamily: 'Manrope, sans-serif' };
   readonly velocityColors = ['#db4035'];
-  readonly velocityPlotOptions: ApexPlotOptions = { bar: { borderRadius: 4, columnWidth: '55%' } };
+  readonly velocityPlotOptions: ApexPlotOptions = { bar: { horizontal: false, borderRadius: 5, columnWidth: '40%' } };
+  readonly velocityYaxis: ApexYAxis = {
+    min: 0,
+    labels: { formatter: (v: number) => Math.round(v).toString(), style: { fontFamily: 'Manrope, sans-serif', fontSize: '11px' } },
+  };
+  readonly chartGrid: ApexGrid = { borderColor: '#e8e6e1', strokeDashArray: 3 };
   readonly chartTooltip: ApexTooltip = { theme: 'light' };
   readonly chartDataLabels: ApexDataLabels = { enabled: false };
-  readonly chartLegend: ApexLegend = { position: 'top' };
+  readonly chartLegend: ApexLegend = { position: 'top', fontFamily: 'Manrope, sans-serif', fontSize: '12px' };
 
   readonly plannedSprints = computed(() => this.sprints().filter(s => s.status === 'planned'));
   readonly activeSprints = computed(() => this.sprints().filter(s => s.status === 'active'));
   readonly completedSprints = computed(() => this.sprints().filter(s => s.status === 'completed'));
+
+  // ── Backlog / sprint task grouping ────────────────────────────────────────
+  readonly sprintTasksMap = computed(() => {
+    const map: Record<string, Task[]> = {};
+    for (const t of this.tasks()) {
+      if (t.sprint) {
+        if (!map[t.sprint]) map[t.sprint] = [];
+        map[t.sprint].push(t);
+      }
+    }
+    return map;
+  });
+
+  readonly backlogTasks = computed(() =>
+    this.tasks().filter(t => !t.sprint && t.status !== 'done' && t.status !== 'cancelled'),
+  );
+
+  sprintTasks(sprintId: string): Task[] { return this.sprintTasksMap()[sprintId] ?? []; }
+
+  readonly assignableSprintsFor = (task: Task) =>
+    this.sprints().filter(s => s.status !== 'completed' && s.id !== task.sprint);
+
+  // ── Task list filter ───────────────────────────────────────────────────────
+  readonly taskSearch = signal('');
+  readonly taskStatusFilter = signal('all');
+
+  private readonly STATUS_LABELS: Record<string, string> = {
+    backlog: 'Backlog', todo: 'To Do', in_progress: 'In Progress',
+    in_review: 'In Review', done: 'Done', cancelled: 'Cancelled',
+  };
+
+  private readonly TYPE_STYLES: Record<string, { label: string; color: string; bg: string }> = {
+    task:     { label: 'Task',     color: '#64748b', bg: '#f1f5f9' },
+    bug:      { label: 'Bug',      color: '#db4035', bg: '#fff0ef' },
+    story:    { label: 'Story',    color: '#7c3aed', bg: '#f5f3ff' },
+    epic:     { label: 'Epic',     color: '#c2610c', bg: '#fff7ed' },
+    personal: { label: 'Personal', color: '#15803d', bg: '#f0fdf4' },
+  };
+
+  private readonly PRIORITY_STYLES: Record<string, { label: string; emoji: string }> = {
+    critical: { label: 'Critical', emoji: '🔥' },
+    high:     { label: 'High',     emoji: '⬆' },
+    medium:   { label: 'Medium',   emoji: '▶' },
+    low:      { label: 'Low',      emoji: '⬇' },
+    none:     { label: 'None',     emoji: '—' },
+  };
+
+  readonly taskStatusCounts = computed(() => {
+    const counts: Record<string, number> = {};
+    for (const t of this.tasks()) counts[t.status] = (counts[t.status] ?? 0) + 1;
+    return counts;
+  });
+
+  readonly availableStatusFilters = computed(() => {
+    const counts = this.taskStatusCounts();
+    return Object.entries(this.STATUS_LABELS)
+      .filter(([key]) => counts[key] > 0)
+      .map(([key, label]) => ({ key, label, count: counts[key] }));
+  });
+
+  readonly filteredTasks = computed(() => {
+    const search = this.taskSearch().toLowerCase().trim();
+    const status = this.taskStatusFilter();
+    return this.tasks().filter(t => {
+      if (status !== 'all' && t.status !== status) return false;
+      if (search && !t.title.toLowerCase().includes(search)) return false;
+      return true;
+    });
+  });
+
+  statusLabel(status: string): string { return this.STATUS_LABELS[status] ?? status; }
+  typeLabel(type: string): string   { return this.TYPE_STYLES[type]?.label  ?? type; }
+  typeColor(type: string): string   { return this.TYPE_STYLES[type]?.color  ?? '#64748b'; }
+  typeBg(type: string): string      { return this.TYPE_STYLES[type]?.bg     ?? '#f1f5f9'; }
+  priorityLabel(p: string): string  { return this.PRIORITY_STYLES[p]?.label ?? p; }
+  priorityEmoji(p: string): string  { return this.PRIORITY_STYLES[p]?.emoji ?? ''; }
+  clearTaskFilters(): void { this.taskSearch.set(''); this.taskStatusFilter.set('all'); }
 
   readonly sprintForm = this.fb.nonNullable.group({
     name:       ['', Validators.required],
@@ -183,10 +275,23 @@ export class ProjectDetailComponent implements OnInit {
 
   readonly projectRoles = ['PO', 'PM', 'DEV', 'VIEWER', 'GUEST'];
 
+  private readonly VALID_TABS: Tab[] = [
+    'overview', 'tasks', 'board', 'sprints', 'members',
+    'labels', 'custom-fields', 'settings', 'analytics',
+  ];
+
   ngOnInit(): void {
     const id = this.route.snapshot.paramMap.get('id') ?? '';
     this.projectId.set(id);
+
+    const tabParam = this.route.snapshot.queryParamMap.get('tab') as Tab | null;
+    const initialTab = tabParam && this.VALID_TABS.includes(tabParam) ? tabParam : 'overview';
+    this.activeTab.set(initialTab);
+
     this.loadAll(id);
+
+    if (initialTab === 'tasks' || initialTab === 'board' || initialTab === 'sprints') this.loadTasks();
+    if (initialTab === 'analytics') this.loadAnalytics();
   }
 
   private loadAll(id: string): void {
@@ -225,7 +330,13 @@ export class ProjectDetailComponent implements OnInit {
 
   setTab(tab: Tab): void {
     this.activeTab.set(tab);
-    if ((tab === 'tasks' || tab === 'board') && this.tasks().length === 0) {
+    this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { tab },
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+    });
+    if ((tab === 'tasks' || tab === 'board' || tab === 'sprints') && this.tasks().length === 0) {
       this.loadTasks();
     }
     if (tab === 'analytics' && !this.analyticsLoaded()) {
@@ -260,6 +371,23 @@ export class ProjectDetailComponent implements OnInit {
 
   openTask(taskId: string): void { this.router.navigate(['/task', taskId]); }
 
+  // ── Sprint task assignment ─────────────────────────────────────────────────
+
+  assignToSprint(task: Task, sprintId: string): void {
+    if (!sprintId) return;
+    this.tasks.update(ts => ts.map(t => t.id === task.id ? { ...t, sprint: sprintId } : t));
+    this.sprintsService.addTask(sprintId, task.id).subscribe({
+      error: () => this.tasks.update(ts => ts.map(t => t.id === task.id ? { ...t, sprint: task.sprint } : t)),
+    });
+  }
+
+  removeFromSprint(task: Task, sprintId: string): void {
+    this.tasks.update(ts => ts.map(t => t.id === task.id ? { ...t, sprint: null } : t));
+    this.sprintsService.removeTask(sprintId, task.id).subscribe({
+      error: () => this.tasks.update(ts => ts.map(t => t.id === task.id ? { ...t, sprint: sprintId } : t)),
+    });
+  }
+
   priorityColor(priority: string): string {
     const map: Record<string, string> = {
       critical: '#db4035', high: '#ff9800', medium: '#a16207', low: '#299438', none: '#8a8680',
@@ -282,27 +410,39 @@ export class ProjectDetailComponent implements OnInit {
     this.analyticsLoading.set(true);
     this.analyticsError.set(null);
     const id = this.projectId();
-
     const sprintId = this.selectedSprintId() || undefined;
 
     const summary$ = this.analyticsService.getSummary(id);
     const snapshots$ = this.analyticsService.getSnapshots(id, { sprint_id: sprintId });
     const members$ = this.analyticsService.getMemberMetrics(id).pipe(catchError(() => of([])));
+    // Always fetch sprints fresh — the signal may still be empty if this runs before loadAll() resolves
+    const sprints$ = this.sprintsService.list(id).pipe(catchError(() => of(this.sprints())));
 
-    const completed = this.completedSprints().slice(-6);
-    const velocity$ = completed.length > 0
-      ? forkJoin(completed.map(s => this.analyticsService.getSnapshots(id, { sprint_id: s.id }).pipe(catchError(() => of([])))))
-      : of([] as TaskSnapshot[][]);
-
-    forkJoin({ summary: summary$, snapshots: snapshots$, members: members$, velocitySnapshots: velocity$ }).subscribe({
-      next: ({ summary, snapshots, members, velocitySnapshots }) => {
+    forkJoin({ summary: summary$, snapshots: snapshots$, members: members$, sprints: sprints$ }).pipe(
+      switchMap(({ summary, snapshots, members, sprints }) => {
+        this.sprints.set(sprints);
+        const completed = sprints.filter(s => s.status === 'completed').slice(-6);
+        // Use sprint detail endpoint: task_stats.completed_story_points is computed live
+        // from actual done tasks — no analytics management command required
+        const velocity$ = completed.length > 0
+          ? forkJoin(completed.map(s =>
+              this.sprintsService.getDetail(s.id).pipe(
+                map((d: SprintDetail) => d.task_stats?.completed_story_points ?? 0),
+                catchError(() => of(0)),
+              )
+            ))
+          : of([] as number[]);
+        return velocity$.pipe(map(points => ({ summary, snapshots, members, velocityPoints: points as number[], completed })));
+      }),
+    ).subscribe({
+      next: ({ summary, snapshots, members, velocityPoints, completed }) => {
         this.summary.set(summary);
         this.snapshots.set(snapshots);
         this.memberMetrics.set(members);
 
-        const vData = (velocitySnapshots as TaskSnapshot[][]).map((snaps, i) => ({
-          name: completed[i]?.name ?? `Sprint ${i + 1}`,
-          points: snaps.length > 0 ? Math.max(...snaps.map(s => s.completed_story_points)) : 0,
+        const vData = completed.map((sprint, i) => ({
+          name: sprint.name,
+          points: velocityPoints[i] ?? 0,
         }));
         this.velocityData.set(vData);
 
