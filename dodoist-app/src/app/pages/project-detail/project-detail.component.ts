@@ -1,4 +1,4 @@
-import { Component, OnInit, inject, signal, computed } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject, signal, computed } from '@angular/core';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { SlicePipe, DecimalPipe } from '@angular/common';
@@ -10,7 +10,7 @@ import { CustomFieldsService, CustomField } from '../../services/custom-fields.s
 import { TaskService, Task } from '../../services/task.service';
 import { UserService } from '../../services/user.service';
 import { AnalyticsService, ProjectSummary, MemberMetric, TaskSnapshot } from '../../services/analytics.service';
-import { switchMap, EMPTY, forkJoin, catchError, of, map } from 'rxjs';
+import { switchMap, EMPTY, forkJoin, catchError, of, map, Subject, takeUntil } from 'rxjs';
 import { ChartComponent } from 'ng-apexcharts';
 import type {
   ApexAxisChartSeries,
@@ -45,7 +45,8 @@ const FIELD_TYPES = ['text', 'number', 'date', 'boolean', 'select'] as const;
   templateUrl: './project-detail.component.html',
   styleUrl: './project-detail.component.scss',
 })
-export class ProjectDetailComponent implements OnInit {
+export class ProjectDetailComponent implements OnInit, OnDestroy {
+  private readonly destroy$ = new Subject<void>();
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly fb = inject(FormBuilder);
@@ -281,17 +282,34 @@ export class ProjectDetailComponent implements OnInit {
   ];
 
   ngOnInit(): void {
-    const id = this.route.snapshot.paramMap.get('id') ?? '';
-    this.projectId.set(id);
+    this.route.paramMap.pipe(takeUntil(this.destroy$)).subscribe(params => {
+      const id = params.get('id') ?? '';
+      this.projectId.set(id);
 
-    const tabParam = this.route.snapshot.queryParamMap.get('tab') as Tab | null;
-    const initialTab = tabParam && this.VALID_TABS.includes(tabParam) ? tabParam : 'overview';
-    this.activeTab.set(initialTab);
+      // Reset state for the new project
+      this.project.set(null);
+      this.members.set([]);
+      this.sprints.set([]);
+      this.labels.set([]);
+      this.customFields.set([]);
+      this.tasks.set([]);
+      this.isLoading.set(true);
+      this.analyticsLoaded.set(false);
 
-    this.loadAll(id);
+      const tabParam = this.route.snapshot.queryParamMap.get('tab') as Tab | null;
+      const initialTab = tabParam && this.VALID_TABS.includes(tabParam) ? tabParam : 'overview';
+      this.activeTab.set(initialTab);
 
-    if (initialTab === 'tasks' || initialTab === 'board' || initialTab === 'sprints') this.loadTasks();
-    if (initialTab === 'analytics') this.loadAnalytics();
+      this.loadAll(id);
+
+      if (initialTab === 'tasks' || initialTab === 'board' || initialTab === 'sprints') this.loadTasks();
+      if (initialTab === 'analytics') this.loadAnalytics();
+    });
+  }
+
+  ngOnDestroy(): void {
+    this.destroy$.next();
+    this.destroy$.complete();
   }
 
   private loadAll(id: string): void {
