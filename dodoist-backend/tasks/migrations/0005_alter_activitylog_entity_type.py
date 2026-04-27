@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('tasks', '0003_add_attachment'),
+        ('tasks', '0004_phase1_indexes'),
     ]
 
     operations = [

@@ -534,7 +534,6 @@ class DashboardStatsView(APIView):
         active_ws = _active_ws(request)
         user = request.user
         now = tz.now()
-        active_ws = get_active_workspace(request)
 
         open_statuses = [
             TaskStatus.BACKLOG,
@@ -549,8 +548,6 @@ class DashboardStatsView(APIView):
             deleted_at__isnull=True,
             **ws_filter,
         )
-        if active_ws is not None:
-            base_qs = base_qs.filter(project__workspace=active_ws)
 
         yesterday = now - timedelta(days=1)
         monday_this_week = _get_monday_of_week(now)
@@ -1189,6 +1186,7 @@ class MyTasksView(APIView):
     def get(self, request):
         from projects.request_helpers import _active_ws
         active_ws = _active_ws(request)
+        ws_filter = {"project__workspace": active_ws} if active_ws else {}
         qs = (
             Task.objects.filter(assigned_to=request.user, deleted_at__isnull=True, **ws_filter)
             .exclude(status="cancelled")
@@ -1196,8 +1194,6 @@ class MyTasksView(APIView):
             .prefetch_related("task_labels__label")
             .order_by("status", "position", "created_at")
         )
-        if active_ws is not None:
-            qs = qs.filter(project__workspace=active_ws)
 
         status_filter = request.query_params.get("status")
         if status_filter:
@@ -1325,16 +1321,6 @@ class TaskSearchView(APIView):
                 status=ProjectStatus.ACTIVE,
             )
         if active_ws is not None:
-            project_qs = project_qs.filter(workspace=active_ws)
-        accessible_pids = project_qs.values_list("id", flat=True)
-
-        tasks = (
-            Task.objects.filter(
-                project_id__in=accessible_pids,
-                deleted_at__isnull=True,
-                title__icontains=q,
-            )
-        if active_ws:
             project_qs = project_qs.filter(workspace=active_ws)
         accessible_pids = project_qs.values_list("id", flat=True)
 

@@ -13,7 +13,6 @@ from .views import (
     RegisterView,
     ResendVerificationView,
     ResetPasswordView,
-    SetActiveWorkspaceView,
     UserDetailView,
     UserListView,
     UserPreferencesView,

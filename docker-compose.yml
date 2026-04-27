@@ -1,4 +1,42 @@
+# Local development stack
+# Usage:
+#   docker compose up        — start everything
+#   docker compose down      — stop + dump the database to ./dumps/
+#   docker compose up --build — rebuild images after requirements change
+
+x-backend-env: &backend-env
+  DJANGO_DEBUG: "true"
+  DB_ENGINE: django.db.backends.postgresql
+  DB_NAME: dodoist
+  DB_USER: dodoist
+  DB_PASSWORD: dodoist
+  DB_HOST: db
+  DB_PORT: "5432"
+  CELERY_BROKER_URL: redis://redis:6379/0
+  CELERY_RESULT_BACKEND: redis://redis:6379/1
+  CELERY_ALWAYS_EAGER: "false"
+
 services:
+
+  db:
+    build:
+      context: ./docker/postgres
+    environment:
+      POSTGRES_DB: dodoist
+      POSTGRES_USER: dodoist
+      POSTGRES_PASSWORD: dodoist
+      DUMPS_DIR: /dumps
+    volumes:
+      - ./dumps:/dumps          # dump files are saved here on shutdown
+    ports:
+      - "5432:5432"
+    stop_grace_period: 60s      # enough time for pg_dump before Docker kills it
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dodoist -d dodoist"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
   redis:
     image: redis:7-alpine
     ports:
@@ -6,38 +44,47 @@ services:
     restart: unless-stopped
 
   backend:
-    build: ./dodoist-backend
-    command: python manage.py runserver 0.0.0.0:8000
+    build:
+      context: .
+      dockerfile: dodoist-backend/Dockerfile.dev
     volumes:
-      - ./dodoist-backend:/app
+      - ./dodoist-backend:/app  # live reload
     ports:
       - "8000:8000"
     environment:
-      - DJANGO_DEBUG=true
-      - CELERY_BROKER_URL=redis://redis:6379/0
+      <<: *backend-env
     depends_on:
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
 
   celery:
-    build: ./dodoist-backend
-    command: celery -A dodoist worker -l info
+    build:
+      context: .
+      dockerfile: dodoist-backend/Dockerfile.dev
+    command: celery -A dodoist worker -l info --concurrency 2
     volumes:
       - ./dodoist-backend:/app
     environment:
-      - DJANGO_DEBUG=true
-      - CELERY_BROKER_URL=redis://redis:6379/0
+      <<: *backend-env
     depends_on:
-      - redis
-      - backend
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
 
   celery-beat:
-    build: ./dodoist-backend
+    build:
+      context: .
+      dockerfile: dodoist-backend/Dockerfile.dev
     command: celery -A dodoist beat -l info
     volumes:
       - ./dodoist-backend:/app
     environment:
-      - DJANGO_DEBUG=true
-      - CELERY_BROKER_URL=redis://redis:6379/0
+      <<: *backend-env
     depends_on:
-      - redis
-      - backend
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
