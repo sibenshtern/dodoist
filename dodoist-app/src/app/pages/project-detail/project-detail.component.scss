@@ -937,3 +937,64 @@ $font-h:     'Lora', Georgia, serif;
   justify-content: center;
   flex-shrink: 0;
 }
+
+// ── Analytics ─────────────────────────────────────────────────────────────────
+
+.analytics-panel { padding: 0; background: none; border: none; box-shadow: none; }
+
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  margin-bottom: 28px;
+}
+
+.kpi-card {
+  background: $bg-surface;
+  border: 1.111px solid $border;
+  border-radius: 10px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.kpi-value {
+  font-size: 28px;
+  font-weight: 700;
+  font-family: $font-b;
+  line-height: 1;
+}
+
+.kpi-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: $gray;
+}
+
+.analytics-section {
+  background: $bg-surface;
+  border: 1.111px solid $border;
+  border-radius: 10px;
+  padding: 20px;
+  margin-bottom: 16px;
+}
+
+.analytics-section__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.analytics-section__title {
+  font-size: 14px;
+  font-weight: 700;
+  color: $dark;
+  margin: 0 0 16px;
+}
+
+.analytics-section__header .analytics-section__title { margin: 0; }

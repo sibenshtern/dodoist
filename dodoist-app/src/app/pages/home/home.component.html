@@ -118,6 +118,10 @@
                   <div class="project-dot" [style.background]="project.color"></div>
                   <span class="project-name">{{ project.name }}</span>
                 </div>
+                <span class="project-open-tasks">{{ project.openTasks }} open</span>
+              </div>
+              <div class="project-progress">
+                <div class="project-progress__fill" [style.width.%]="project.progress" [style.background]="project.color"></div>
               </div>
             </a>
           }

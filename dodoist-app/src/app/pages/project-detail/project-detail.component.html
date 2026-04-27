@@ -35,7 +35,8 @@
   <nav class="pd-tabs">
     @for (t of [
       ['overview','Overview'],['tasks','Tasks'],['board','Board'],['sprints','Sprints'],
-      ['members','Members'],['labels','Labels'],['custom-fields','Fields'],['settings','Settings']
+      ['members','Members'],['labels','Labels'],['custom-fields','Fields'],['settings','Settings'],
+      ['analytics','Analytics']
     ]; track t[0]) {
       <button
         class="pd-tab"
@@ -405,6 +406,129 @@
             </li>
           }
         </ul>
+      }
+    </div>
+  }
+
+  <!-- ── Analytics ───────────────────────────────────────────────────────────── -->
+  @if (activeTab() === 'analytics') {
+    <div class="pd-panel analytics-panel">
+
+      @if (analyticsLoading()) {
+        <div class="pd-empty"><p>Loading analytics…</p></div>
+      } @else {
+
+        <!-- KPI tiles -->
+        @if (summary(); as s) {
+          <div class="kpi-grid">
+            <div class="kpi-card">
+              <span class="kpi-value" style="color:#db4035">{{ s.open_tasks }}</span>
+              <span class="kpi-label">Open Tasks</span>
+            </div>
+            <div class="kpi-card">
+              <span class="kpi-value" style="color:#7c3aed">{{ s.overdue_tasks }}</span>
+              <span class="kpi-label">Overdue</span>
+            </div>
+            <div class="kpi-card">
+              <span class="kpi-value" style="color:#246fe0">{{ s.velocity }}</span>
+              <span class="kpi-label">Velocity (avg)</span>
+            </div>
+            <div class="kpi-card">
+              <span class="kpi-value" style="color:#299438">{{ s.progress }}%</span>
+              <span class="kpi-label">Progress</span>
+            </div>
+          </div>
+        }
+
+        <!-- Sprint selector for burndown -->
+        <div class="analytics-section">
+          <div class="analytics-section__header">
+            <h3 class="analytics-section__title">Burndown</h3>
+            <select class="pd-select" (change)="selectSprint($any($event.target).value)">
+              <option value="">Project (no sprint)</option>
+              @for (s of sprints(); track s.id) {
+                <option [value]="s.id" [selected]="selectedSprintId() === s.id">{{ s.name }} ({{ s.status }})</option>
+              }
+            </select>
+          </div>
+
+          @if (snapshots().length === 0) {
+            <div class="pd-empty">
+              <tui-icon icon="@tui.trending-down" class="pd-empty__icon" />
+              <p>No snapshot data yet. Run the analytics management command to populate.</p>
+            </div>
+          } @else {
+            <apx-chart
+              [series]="burndownSeries()"
+              [chart]="burndownChart"
+              [xaxis]="burndownXaxis()"
+              [stroke]="burndownStroke"
+              [fill]="burndownFill"
+              [colors]="burndownColors"
+              [tooltip]="chartTooltip"
+              [dataLabels]="chartDataLabels"
+              [legend]="chartLegend"
+            ></apx-chart>
+          }
+        </div>
+
+        <!-- Velocity chart -->
+        <div class="analytics-section">
+          <h3 class="analytics-section__title">Velocity (last {{ velocityData().length }} sprints)</h3>
+          @if (velocityData().length === 0) {
+            <div class="pd-empty">
+              <tui-icon icon="@tui.zap" class="pd-empty__icon" />
+              <p>No completed sprints yet.</p>
+            </div>
+          } @else {
+            <apx-chart
+              [series]="velocitySeries()"
+              [chart]="velocityChart"
+              [xaxis]="velocityXaxis()"
+              [colors]="velocityColors"
+              [plotOptions]="velocityPlotOptions"
+              [dataLabels]="chartDataLabels"
+              [tooltip]="chartTooltip"
+            ></apx-chart>
+          }
+        </div>
+
+        <!-- Member metrics table -->
+        @if (memberMetrics().length > 0) {
+          <div class="analytics-section">
+            <h3 class="analytics-section__title">Member Metrics</h3>
+            <table class="pd-table">
+              <thead>
+                <tr>
+                  <th>Member</th>
+                  <th>Completed</th>
+                  <th>Created</th>
+                  <th>Assigned</th>
+                  <th>Comments</th>
+                  <th>Hours Logged</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (m of memberMetrics(); track m.user.id) {
+                  <tr>
+                    <td>
+                      <div class="pd-user-cell">
+                        <span class="pd-avatar pd-avatar--sm">{{ m.user.display_name[0].toUpperCase() }}</span>
+                        <span class="pd-user-cell__name">{{ m.user.display_name }}</span>
+                      </div>
+                    </td>
+                    <td>{{ m.tasks_completed }}</td>
+                    <td>{{ m.tasks_created }}</td>
+                    <td>{{ m.tasks_assigned }}</td>
+                    <td>{{ m.comments_posted }}</td>
+                    <td>{{ (m.logged_minutes / 60) | number:'1.1-1' }}h</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        }
+
       }
     </div>
   }

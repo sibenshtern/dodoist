@@ -1,7 +1,7 @@
 import { Component, OnInit, inject, signal, computed } from '@angular/core';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
-import { SlicePipe } from '@angular/common';
+import { SlicePipe, DecimalPipe } from '@angular/common';
 import { TuiIcon } from '@taiga-ui/core';
 import { ProjectsService, Project, ProjectMember } from '../../services/projects.service';
 import { SprintsService, Sprint, SprintCreatePayload } from '../../services/sprints.service';
@@ -9,9 +9,22 @@ import { LabelsService, Label } from '../../services/labels.service';
 import { CustomFieldsService, CustomField } from '../../services/custom-fields.service';
 import { TaskService, Task } from '../../services/task.service';
 import { UserService } from '../../services/user.service';
-import { switchMap, EMPTY } from 'rxjs';
+import { AnalyticsService, ProjectSummary, MemberMetric, TaskSnapshot } from '../../services/analytics.service';
+import { switchMap, EMPTY, forkJoin, catchError, of } from 'rxjs';
+import { ChartComponent } from 'ng-apexcharts';
+import type {
+  ApexAxisChartSeries,
+  ApexChart,
+  ApexXAxis,
+  ApexStroke,
+  ApexFill,
+  ApexTooltip,
+  ApexDataLabels,
+  ApexPlotOptions,
+  ApexLegend,
+} from 'ng-apexcharts';
 
-type Tab = 'overview' | 'tasks' | 'board' | 'sprints' | 'members' | 'labels' | 'custom-fields' | 'settings';
+type Tab = 'overview' | 'tasks' | 'board' | 'sprints' | 'members' | 'labels' | 'custom-fields' | 'settings' | 'analytics';
 
 const STATUS_COLUMNS = [
   { key: 'backlog',     label: 'Backlog',     color: '#94a3b8' },
@@ -26,7 +39,7 @@ const FIELD_TYPES = ['text', 'number', 'date', 'boolean', 'select'] as const;
 @Component({
   selector: 'app-project-detail',
   standalone: true,
-  imports: [TuiIcon, ReactiveFormsModule, RouterLink, SlicePipe],
+  imports: [TuiIcon, ReactiveFormsModule, RouterLink, SlicePipe, DecimalPipe, ChartComponent],
   templateUrl: './project-detail.component.html',
   styleUrl: './project-detail.component.scss',
 })
@@ -40,6 +53,7 @@ export class ProjectDetailComponent implements OnInit {
   private readonly customFieldsService = inject(CustomFieldsService);
   private readonly taskService = inject(TaskService);
   readonly userService = inject(UserService);
+  private readonly analyticsService = inject(AnalyticsService);
 
   readonly projectId = signal('');
   readonly project = signal<Project | null>(null);
@@ -99,6 +113,34 @@ export class ProjectDetailComponent implements OnInit {
   readonly settingsError = signal('');
 
   readonly fieldTypes = FIELD_TYPES;
+
+  // ── Analytics ─────────────────────────────────────────────────────────────────
+  readonly analyticsLoaded = signal(false);
+  readonly analyticsLoading = signal(false);
+  readonly summary = signal<ProjectSummary | null>(null);
+  readonly snapshots = signal<TaskSnapshot[]>([]);
+  readonly memberMetrics = signal<MemberMetric[]>([]);
+  readonly velocityData = signal<Array<{ name: string; points: number }>>([]);
+  readonly selectedSprintId = signal('');
+  readonly analyticsError = signal<string | null>(null);
+
+  // Chart data signals (update when data loads)
+  readonly burndownSeries = signal<ApexAxisChartSeries>([]);
+  readonly burndownXaxis = signal<ApexXAxis>({});
+  readonly velocitySeries = signal<ApexAxisChartSeries>([]);
+  readonly velocityXaxis = signal<ApexXAxis>({});
+
+  // Readonly chart config (does not change)
+  readonly burndownChart: ApexChart = { type: 'area', height: 300, toolbar: { show: false } };
+  readonly burndownStroke: ApexStroke = { curve: 'smooth', width: [2, 2] };
+  readonly burndownFill: ApexFill = { type: ['solid', 'gradient'], opacity: [0, 0.15] };
+  readonly burndownColors = ['#b0aea9', '#246fe0'];
+  readonly velocityChart: ApexChart = { type: 'bar', height: 260, toolbar: { show: false } };
+  readonly velocityColors = ['#db4035'];
+  readonly velocityPlotOptions: ApexPlotOptions = { bar: { borderRadius: 4, columnWidth: '55%' } };
+  readonly chartTooltip: ApexTooltip = { theme: 'light' };
+  readonly chartDataLabels: ApexDataLabels = { enabled: false };
+  readonly chartLegend: ApexLegend = { position: 'top' };
 
   readonly plannedSprints = computed(() => this.sprints().filter(s => s.status === 'planned'));
   readonly activeSprints = computed(() => this.sprints().filter(s => s.status === 'active'));
@@ -186,6 +228,9 @@ export class ProjectDetailComponent implements OnInit {
     if ((tab === 'tasks' || tab === 'board') && this.tasks().length === 0) {
       this.loadTasks();
     }
+    if (tab === 'analytics' && !this.analyticsLoaded()) {
+      this.loadAnalytics();
+    }
   }
 
   private loadTasks(): void {
@@ -229,6 +274,85 @@ export class ProjectDetailComponent implements OnInit {
 
   assigneeInitial(task: Task): string {
     return task.assigned_to?.display_name[0]?.toUpperCase() ?? '?';
+  }
+
+  // ── Analytics ─────────────────────────────────────────────────────────────────
+
+  loadAnalytics(): void {
+    this.analyticsLoading.set(true);
+    this.analyticsError.set(null);
+    const id = this.projectId();
+
+    const sprintId = this.selectedSprintId() || undefined;
+
+    const summary$ = this.analyticsService.getSummary(id);
+    const snapshots$ = this.analyticsService.getSnapshots(id, { sprint_id: sprintId });
+    const members$ = this.analyticsService.getMemberMetrics(id).pipe(catchError(() => of([])));
+
+    const completed = this.completedSprints().slice(-6);
+    const velocity$ = completed.length > 0
+      ? forkJoin(completed.map(s => this.analyticsService.getSnapshots(id, { sprint_id: s.id }).pipe(catchError(() => of([])))))
+      : of([] as TaskSnapshot[][]);
+
+    forkJoin({ summary: summary$, snapshots: snapshots$, members: members$, velocitySnapshots: velocity$ }).subscribe({
+      next: ({ summary, snapshots, members, velocitySnapshots }) => {
+        this.summary.set(summary);
+        this.snapshots.set(snapshots);
+        this.memberMetrics.set(members);
+
+        const vData = (velocitySnapshots as TaskSnapshot[][]).map((snaps, i) => ({
+          name: completed[i]?.name ?? `Sprint ${i + 1}`,
+          points: snaps.length > 0 ? Math.max(...snaps.map(s => s.completed_story_points)) : 0,
+        }));
+        this.velocityData.set(vData);
+
+        this.buildCharts();
+        this.analyticsLoaded.set(true);
+        this.analyticsLoading.set(false);
+      },
+      error: err => {
+        this.analyticsError.set(err?.error?.detail ?? 'Failed to load analytics.');
+        this.analyticsLoading.set(false);
+      },
+    });
+  }
+
+  selectSprint(id: string): void {
+    this.selectedSprintId.set(id);
+    const sprintId = id || undefined;
+    this.analyticsService.getSnapshots(this.projectId(), { sprint_id: sprintId }).subscribe({
+      next: snaps => {
+        this.snapshots.set(snaps);
+        this.buildCharts();
+      },
+      error: console.error,
+    });
+  }
+
+  private buildCharts(): void {
+    const snaps = this.snapshots();
+    if (snaps.length > 0) {
+      const categories = snaps.map(s => s.snapshot_date);
+      const firstTotal = snaps[0].total_story_points;
+      const count = snaps.length;
+      const ideal = snaps.map((_, i) =>
+        Math.round(firstTotal * (1 - i / Math.max(count - 1, 1))),
+      );
+      const remaining = snaps.map(s => s.total_story_points - s.completed_story_points);
+
+      this.burndownSeries.set([
+        { name: 'Ideal', type: 'line', data: ideal },
+        { name: 'Remaining', type: 'area', data: remaining },
+      ]);
+      this.burndownXaxis.set({ categories, labels: { rotate: -30 } });
+    } else {
+      this.burndownSeries.set([]);
+      this.burndownXaxis.set({});
+    }
+
+    const vd = this.velocityData();
+    this.velocitySeries.set([{ name: 'Story Points', data: vd.map(v => v.points) }]);
+    this.velocityXaxis.set({ categories: vd.map(v => v.name) });
   }
 
   // ── Sprints ─────────────────────────────────────────────────────────────────
