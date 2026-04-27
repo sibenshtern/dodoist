@@ -159,16 +159,18 @@
           <tbody>
             @for (t of filteredTasks(); track t.id) {
               <tr class="pd-task-row" (click)="openTask(t.id)">
-                <td class="pd-task-title-cell">
-                  <span class="pd-type-chip"
-                    [style.color]="typeColor(t.type)"
-                    [style.background]="typeBg(t.type)">
-                    {{ typeLabel(t.type) }}
-                  </span>
-                  <span class="pd-task-name">{{ t.title }}</span>
-                  @for (lbl of t.labels; track lbl.id) {
-                    <span class="pd-task-label" [style.background]="lbl.color + '22'" [style.color]="lbl.color">{{ lbl.name }}</span>
-                  }
+                <td>
+                  <div class="pd-task-title-cell">
+                    <span class="pd-type-chip"
+                      [style.color]="typeColor(t.type)"
+                      [style.background]="typeBg(t.type)">
+                      {{ typeLabel(t.type) }}
+                    </span>
+                    <span class="pd-task-name">{{ t.title }}</span>
+                    @for (lbl of t.labels; track lbl.id) {
+                      <span class="pd-task-label" [style.background]="lbl.color + '22'" [style.color]="lbl.color">{{ lbl.name }}</span>
+                    }
+                  </div>
                 </td>
                 <td>
                   <span class="pd-status-chip pd-status-chip--{{ t.status }}">
@@ -389,7 +391,19 @@
               <div class="sprint-task-empty">All tasks are assigned to sprints.</div>
             }
             @for (t of backlogTasks(); track t.id) {
-              <div class="sprint-task-row sprint-task-row--backlog" (click)="openTask(t.id)">
+              <div
+                class="sprint-task-row sprint-task-row--backlog"
+                draggable="true"
+                [class.sprint-task-row--dragging]="draggedBacklogId === t.id"
+                [class.sprint-task-row--drag-over]="backlogDragOverId === t.id"
+                (click)="openTask(t.id)"
+                (dragstart)="onBacklogDragStart(t.id)"
+                (dragover)="onBacklogDragOver($event, t.id)"
+                (dragleave)="backlogDragOverId = null"
+                (drop)="onBacklogDrop(t.id)"
+                (dragend)="draggedBacklogId = null; backlogDragOverId = null"
+              >
+                <span class="sprint-task-row__drag-handle" (click)="$event.stopPropagation()" title="Drag to reorder">⠿</span>
                 <span class="sprint-task-row__type-dot" [style.background]="typeColor(t.type)" title="{{ typeLabel(t.type) }}"></span>
                 <span class="sprint-task-row__priority-dot" [style.background]="priorityColor(t.priority)" title="{{ priorityLabel(t.priority) }}"></span>
                 <span class="sprint-task-row__title">{{ t.title }}</span>

@@ -81,6 +81,8 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   });
 
   private draggedTaskId: string | null = null;
+  draggedBacklogId: string | null = null;
+  backlogDragOverId: string | null = null;
 
   // Sprint dialog
   readonly showSprintDialog = signal(false);
@@ -404,6 +406,51 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
     this.sprintsService.removeTask(sprintId, task.id).subscribe({
       error: () => this.tasks.update(ts => ts.map(t => t.id === task.id ? { ...t, sprint: sprintId } : t)),
     });
+  }
+
+  // ── Backlog drag-and-drop reorder ─────────────────────────────────────────
+
+  onBacklogDragStart(taskId: string): void {
+    this.draggedBacklogId = taskId;
+  }
+
+  onBacklogDragOver(event: DragEvent, targetId: string): void {
+    event.preventDefault();
+    if (this.draggedBacklogId !== targetId) {
+      this.backlogDragOverId = targetId;
+    }
+  }
+
+  onBacklogDrop(targetId: string): void {
+    const fromId = this.draggedBacklogId;
+    this.draggedBacklogId = null;
+    this.backlogDragOverId = null;
+    if (!fromId || fromId === targetId) return;
+
+    const backlog = this.backlogTasks();
+    const fromIdx = backlog.findIndex(t => t.id === fromId);
+    const toIdx   = backlog.findIndex(t => t.id === targetId);
+    if (fromIdx === -1 || toIdx === -1) return;
+
+    // Compute new float position between neighbors
+    const reordered = [...backlog];
+    const [moved] = reordered.splice(fromIdx, 1);
+    reordered.splice(toIdx, 0, moved);
+
+    const newPosition = this.computePosition(reordered, toIdx);
+
+    // Optimistic update
+    this.tasks.update(ts => ts.map(t => t.id === fromId ? { ...t, position: newPosition } : t));
+
+    this.taskService.updateTask(fromId, { position: newPosition }).subscribe({
+      error: () => this.loadTasks(),
+    });
+  }
+
+  private computePosition(list: Task[], idx: number): number {
+    const prev = idx > 0 ? (list[idx - 1].position ?? (idx - 1) * 1000) : 0;
+    const next = idx < list.length - 1 ? (list[idx + 1].position ?? (idx + 1) * 1000) : prev + 2000;
+    return (prev + next) / 2;
   }
 
   priorityColor(priority: string): string {

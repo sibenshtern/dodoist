@@ -30,6 +30,7 @@ export interface Task {
   created_by: TaskUser;
   labels: TaskLabel[];
   sprint: string | null;
+  position: number;
 }
 
 export interface TaskDetail extends Task {
@@ -118,6 +119,7 @@ export class TaskService {
     start_date?: string | null;
     is_private?: boolean;
     reminder_at?: string | null;
+    position?: number;
   }): Observable<Task> {
     return this.http.patch<Task>(`${environment.apiBase}/api/tasks/${taskId}/`, patch);
   }

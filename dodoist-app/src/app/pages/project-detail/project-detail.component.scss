@@ -462,6 +462,27 @@ $font-h:     'Lora', Georgia, serif;
   flex-shrink: 0;
 }
 
+.sprint-task-row--dragging {
+  opacity: 0.4;
+}
+
+.sprint-task-row--drag-over {
+  border-top: 2px solid #7c3aed;
+}
+
+.sprint-task-row__drag-handle {
+  color: $gray-lt;
+  font-size: 14px;
+  cursor: grab;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 120ms;
+  user-select: none;
+
+  .sprint-task-row:hover & { opacity: 1; }
+  &:active { cursor: grabbing; }
+}
+
 .sprint-task-row__remove {
   background: none;
   border: none;
